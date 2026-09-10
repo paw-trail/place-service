@@ -132,7 +132,11 @@ public class Place extends BaseEntity {
 
     // 공사 원천 분류임, 가공하지 않고 그대로 담음
     // place_type 매핑 규칙을 나중에 바꿔도 다시 뽑을 수 있게 남겨 둠
-    @Column(name = "lcls1", length = 30)
+    //
+    // 폭이 100 인 이유는 고캠핑 induty 에 부대시설 목록이 통째로 들어간 행이 23 건 있어서임
+    // 최장 79 자이며 소스 쪽 입력 오류라 우리가 고칠 수 없음
+    // 잘라 담지 않는 것은 이 컬럼이 원문을 그대로 담는 자리이기 때문임
+    @Column(name = "lcls1", length = 100)
     private String lcls1;
 
     @Column(name = "lcls2", length = 30)
