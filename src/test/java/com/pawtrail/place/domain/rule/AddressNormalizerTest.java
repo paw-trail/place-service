@@ -98,6 +98,51 @@ class AddressNormalizerTest {
     }
 
     @Nested
+    @DisplayName("시도명과 도로명 경계")
+    class Boundary {
+
+        @Test
+        @DisplayName("더 긴 시도 표기가 먼저 맞는다")
+        void 통합_명칭이_먼저_맞는다() {
+            // 전남광주통합특별시는 전남으로도 시작함
+            // 전남이 먼저 맞으면 광주통합특별시가 주소 나머지로 남음
+            // Sido 가 통합 명칭까지 한 목록에 담아 길이 내림차순으로 찾아 구조가 막음
+            assertThat(AddressNormalizer.normalize("전남광주통합특별시 순천시 순천만길 513-25", null, null))
+                    .isEqualTo("전남|순천시순천만길513-25");
+        }
+
+        @Test
+        @DisplayName("시도명으로 시작하는 도로명을 시도로 보지 않는다")
+        void 도로명을_시도로_보지_않는다() {
+            // 실재하는 도로명들임
+            // 경계를 두지 않으면 전남대학로가 전라남도로 판정되어 시도가 아예 다른 곳이 됨
+            // 그 도로는 광주에 있음
+            assertThat(AddressNormalizer.normalize("서울숲길 17", null, "경기도"))
+                    .isEqualTo("경기|서울숲길17");
+            assertThat(AddressNormalizer.normalize("전남대학로 1", null, "광주광역시"))
+                    .isEqualTo("광주|전남대학로1");
+            assertThat(AddressNormalizer.normalize("강원대학로 1", null, "강원특별자치도"))
+                    .isEqualTo("강원|강원대학로1");
+        }
+
+        @Test
+        @DisplayName("주소가 시도로만 이뤄져도 받는다")
+        void 시도만_있어도_받는다() {
+            // 경계 검사가 문자열 끝도 경계로 봐야 함
+            assertThat(AddressNormalizer.normalize("서울 종로구", null, null))
+                    .isEqualTo("서울|종로구");
+        }
+
+        @Test
+        @DisplayName("시도와 다음 토큰이 붙어 와도 처리한다")
+        void 붙어_와도_처리한다() {
+            // 공백이 없는 형태로 오는 소스가 있을 수 있음
+            assertThat(AddressNormalizer.normalize("서울특별시종로구계동길37", null, null))
+                    .isEqualTo("서울|종로구계동길37");
+        }
+    }
+
+    @Nested
     @DisplayName("행정 개편 매핑")
     class DistrictAlias {
 

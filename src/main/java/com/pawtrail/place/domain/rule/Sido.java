@@ -74,17 +74,29 @@ public enum Sido {
         return canonical;
     }
 
-    // 표기 -> 시도
+    // 통합 명칭을 포함한 모든 표기입니다
     //
-    // 긴 표기부터 찾아야 합니다.
-    // "강원" 을 먼저 맞추면 "강원특별자치도" 가 "특별자치도" 를 남긴 채 잘립니다.
-    private static final List<Map.Entry<String, Sido>> BY_LENGTH_DESC =
-            java.util.Arrays.stream(values())
-                    .flatMap(sido -> java.util.stream.Stream.concat(
-                                    java.util.stream.Stream.of(sido.canonical),
-                                    sido.variants.stream())
-                            .map(name -> Map.entry(name, sido)))
-                    .sorted((a, b) -> b.getKey().length() - a.getKey().length())
+    // 통합 명칭은 시도가 하나로 정해지지 않아 값이 null 입니다
+    // 시군구를 함께 봐야 전남인지 광주인지 알 수 있어 AddressNormalizer 가 처리합니다
+    //
+    // 한 목록에 함께 두는 것이 중요합니다
+    // 따로 두면 어느 것을 먼저 검사하느냐가 코드 순서에 달리는데,
+    // "전남광주통합특별시" 는 "전남" 으로도 시작하므로 순서가 뒤집히면
+    // 광주통합특별시가 주소 나머지로 남습니다
+    // 한 목록에서 길이 내림차순으로 찾으면 구조가 그것을 막습니다
+    private static final List<Candidate> CANDIDATES =
+            java.util.stream.Stream.concat(
+                            java.util.Arrays.stream(values())
+                                    .flatMap(sido -> java.util.stream.Stream.concat(
+                                            // 짧은 이름은 도로명의 첫 글자가 될 수 있어 뒤에 경계를 요구합니다
+                                            java.util.stream.Stream.of(
+                                                    new Candidate(sido.canonical, sido, true)),
+                                            // 전체 표기는 도로명에 그대로 박힐 일이 없어 붙어 있어도 받습니다
+                                            sido.variants.stream()
+                                                    .map(name -> new Candidate(name, sido, false)))),
+                            java.util.stream.Stream.of(
+                                    new Candidate(MERGED_JEONNAM_GWANGJU, null, false)))
+                    .sorted((a, b) -> b.name().length() - a.name().length())
                     .toList();
 
     // 코드 -> 시도
@@ -92,33 +104,67 @@ public enum Sido {
             java.util.Arrays.stream(values())
                     .collect(java.util.stream.Collectors.toMap(Sido::code, s -> s));
 
+    private record Candidate(String name, Sido sido, boolean requireBoundary) {
+    }
+
     /**
      * 주소가 시도 표기로 시작하면 그 시도와 표기 길이를 함께 돌려줍니다.
      *
      * 길이를 함께 주는 이유는 부르는 쪽이 그만큼 잘라내야 하기 때문입니다.
      * 시도만 돌려주면 어느 표기가 맞았는지 알 수 없어 다시 찾게 됩니다.
      *
-     * 긴 표기부터 맞춰 봅니다.
-     * "강원" 을 먼저 맞추면 "강원특별자치도" 에서 "특별자치도" 가 남습니다.
+     * 긴 표기부터 맞춰 봅니다. 여기에 두 가지가 걸려 있습니다.
+     *   "강원" 을 먼저 맞추면 "강원특별자치도" 에서 "특별자치도" 가 남습니다
+     *   "전남" 을 먼저 맞추면 "전남광주통합특별시" 에서 "광주통합특별시" 가 남습니다
      *
-     * 통합 명칭은 여기서 다루지 않습니다. 시군구를 함께 봐야 하기 때문입니다.
+     * 짧은 이름은 뒤에 공백이 있어야 시도로 봅니다.
+     * 시도명으로 시작하는 도로명이 실제로 있기 때문입니다.
+     *   서울숲길(성동구) · 강원대학로(춘천) · 경기대로(수원)
+     *   전남대학로(광주) · 충남대학로(대전) · 제주대학로
+     * 경계를 두지 않으면 전남대학로가 전라남도로 판정되어 시도가 아예 다른 곳이 됩니다.
+     *
+     * 전체 표기는 붙어 있어도 받습니다.
+     * "서울특별시길" 같은 도로명이 없어 도로명과 헷갈릴 일이 없고,
+     * 소스가 공백 없이 이어 붙여 주는 경우를 받아야 하기 때문입니다.
+     *
+     * 통합 명칭이 맞으면 sido 가 null 인 Prefix 를 돌려줍니다.
+     * 전남인지 광주인지는 시군구를 봐야 알 수 있어 여기서 답할 수 없습니다.
      */
     public static Prefix matchPrefix(String address) {
         if (address == null) {
             return null;
         }
-        for (Map.Entry<String, Sido> entry : BY_LENGTH_DESC) {
-            if (address.startsWith(entry.getKey())) {
-                return new Prefix(entry.getValue(), entry.getKey().length());
+        for (Candidate candidate : CANDIDATES) {
+            if (!address.startsWith(candidate.name())) {
+                continue;
             }
+            if (candidate.requireBoundary() && !hasBoundary(address, candidate.name().length())) {
+                continue;
+            }
+            return new Prefix(candidate.sido(), candidate.name().length());
         }
         return null;
     }
 
     /**
+     * 표기 바로 뒤가 경계인지 봅니다.
+     *
+     * 주소가 시도로만 이뤄진 경우도 경계로 봅니다.
+     */
+    private static boolean hasBoundary(String address, int length) {
+        return address.length() == length || Character.isWhitespace(address.charAt(length));
+    }
+
+    /**
      * 주소 앞에서 찾아낸 시도와 그 표기의 길이입니다.
+     *
+     * sido 가 null 이면 통합 명칭이 맞은 것이며 시군구를 봐야 갈립니다.
      */
     public record Prefix(Sido sido, int length) {
+
+        public boolean isMerged() {
+            return sido == null;
+        }
     }
 
     /**
@@ -131,9 +177,11 @@ public enum Sido {
             return null;
         }
         String trimmed = name.trim();
-        for (Map.Entry<String, Sido> entry : BY_LENGTH_DESC) {
-            if (entry.getKey().equals(trimmed)) {
-                return entry.getValue();
+        for (Candidate candidate : CANDIDATES) {
+            // 통합 명칭은 값이 null 이므로 여기서는 걸러냅니다
+            // 시도 필드에 통합 명칭이 오면 시군구를 알 수 없어 답할 수 없습니다
+            if (candidate.sido() != null && candidate.name().equals(trimmed)) {
+                return candidate.sido();
             }
         }
         return null;

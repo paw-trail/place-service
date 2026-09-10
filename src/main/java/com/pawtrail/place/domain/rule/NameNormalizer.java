@@ -21,7 +21,12 @@ public final class NameNormalizer {
 
     // 괄호 안 내용을 뽑습니다
     // 반각과 전각을 모두 받습니다, 소스마다 섞여 옵니다
-    private static final Pattern PAREN = Pattern.compile("[(（]([^)）]{1,40})[)）]");
+    //
+    // 길이 제한을 두지 않습니다
+    // 안쪽 문자 집합이 닫는 괄호를 받지 않으므로 한 쌍을 넘어 번지지 않습니다
+    // 제한을 두면 긴 괄호가 든 이름에서 별칭과 본명을 둘 다 잃습니다
+    // 그 이름들은 매칭 후보라 잃으면 병합이 줄어듭니다
+    private static final Pattern PAREN = Pattern.compile("[(（]([^)）]*)[)）]");
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 

@@ -113,21 +113,22 @@ public final class AddressNormalizer {
     /**
      * 시도를 떼어내고 나머지를 남깁니다.
      *
-     * 순서가 셋입니다.
-     *   통합 명칭이면 시군구를 보고 전남과 광주로 되돌립니다
-     *   보통 표기면 그대로 뗍니다
-     *   둘 다 아니면 소스가 준 시도 필드를 앞에 붙인 것으로 봅니다
+     * 순서가 둘입니다.
+     *   시도 표기가 맞으면 그만큼 떼어냅니다
+     *     통합 명칭이 맞았으면 남은 부분의 시군구를 보고 전남과 광주로 되돌립니다
+     *   맞는 표기가 없으면 소스가 준 시도 필드를 앞에 붙인 것으로 봅니다
+     *
+     * 통합 명칭을 따로 검사하지 않는 것이 중요합니다.
+     * Sido 가 통합 명칭까지 한 목록에 담아 길이 내림차순으로 찾으므로
+     * "전남" 이 "전남광주통합특별시" 보다 먼저 맞는 일이 구조적으로 없습니다.
      */
     private static Resolved resolveSido(String address, String sidoFallback) {
-        if (address.startsWith(Sido.MERGED_JEONNAM_GWANGJU)) {
-            String rest = address.substring(Sido.MERGED_JEONNAM_GWANGJU.length()).trim();
-            return new Resolved(splitMerged(rest), rest);
-        }
-
         Sido.Prefix prefix = Sido.matchPrefix(address);
         if (prefix != null) {
             String rest = address.substring(prefix.length()).trim();
-            return new Resolved(prefix.sido(), rest);
+            // 통합 명칭이면 시군구를 보고 전남과 광주로 되돌립니다
+            Sido sido = prefix.isMerged() ? splitMerged(rest) : prefix.sido();
+            return new Resolved(sido, rest);
         }
 
         // 주소에 시도가 없는 행입니다

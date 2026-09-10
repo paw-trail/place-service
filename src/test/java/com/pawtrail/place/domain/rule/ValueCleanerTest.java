@@ -43,6 +43,30 @@ class ValueCleanerTest {
         }
 
         @Test
+        @DisplayName("네 자리 대표번호를 뽑는다")
+        void 대표번호를_뽑는다() {
+            // 적재본에서 이 형태가 314 건이며 세 덩어리만 받으면 전부 놓침
+            assertThat(ValueCleaner.extractPhone("1644-4001")).isEqualTo("1644-4001");
+            assertThat(ValueCleaner.extractPhone("아라종합안내센터 1899-3650")).isEqualTo("1899-3650");
+        }
+
+        @Test
+        @DisplayName("세 덩어리를 대표번호보다 먼저 맞춘다")
+        void 세_덩어리가_먼저() {
+            // 두 덩어리를 앞에 두면 02-2148-4161 에서 2148-4161 만 잘라 감
+            assertThat(ValueCleaner.extractPhone("02-2148-4161")).isEqualTo("02-2148-4161");
+            assertThat(ValueCleaner.extractPhone("031-8025-3300")).isEqualTo("031-8025-3300");
+        }
+
+        @Test
+        @DisplayName("잘린 번호는 담지 않는다")
+        void 잘린_번호는_담지_않는다() {
+            // 소스가 값을 잘라 보낸 것이라 담으면 걸리지 않는 번호가 화면에 뜸
+            assertThat(ValueCleaner.extractPhone("033-560-")).isNull();
+            assertThat(ValueCleaner.extractPhone("빨간 이국적 카페트가 예쁜 카페!")).isNull();
+        }
+
+        @Test
         @DisplayName("번호가 없으면 null 이다")
         void 번호가_없으면_null() {
             // 전화번호 자리에 번호 아닌 것을 담을 이유가 없음

@@ -85,6 +85,16 @@ class NameNormalizerTest {
         }
 
         @Test
+        @DisplayName("괄호 안이 길어도 잃지 않는다")
+        void 긴_괄호도_담는다() {
+            // 길이 제한을 두면 별칭과 본명을 둘 다 잃음
+            // 그 이름들은 매칭 후보라 잃으면 병합이 줄어듦
+            String longInside = "가".repeat(60);
+            assertThat(NameNormalizer.extractAliases("어떤장소 (" + longInside + ")"))
+                    .containsExactly(longInside, "어떤장소");
+        }
+
+        @Test
         @DisplayName("정규화 이름과 같은 값은 담지 않는다")
         void 자기_자신은_담지_않는다() {
             // 괄호를 떼도 같은 문자열이 되는 경우
