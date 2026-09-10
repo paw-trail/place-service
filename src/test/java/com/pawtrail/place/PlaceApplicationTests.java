@@ -1,4 +1,4 @@
-package com.pawtrail.template;
+package com.pawtrail.place;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -6,6 +6,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 // 애플리케이션 컨텍스트가 뜨는지만 확인하는 검사임
 // 본문이 비어 있어도 @SpringBootTest 가 앱을 통째로 한 번 띄워보므로
@@ -21,10 +22,21 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 //   그쪽은 compose 가, 이쪽은 이 코드가 띄우며 서로를 쓰지 않음
 //   db 프로파일을 켜 두어도 이 검사는 자기 컨테이너를 새로 만듦
 //
-// * 이미지를 postgres:17-alpine 으로 둔 이유
-//   arm64 를 지원해 Apple Silicon 에서 에뮬레이션 없이 돎
-//   좌표 타입이 필요한 서비스(search, route, place)는 postgis/postgis:17-3.5 로 바꿀 것
-//   그 이미지는 amd64 전용이라 Apple Silicon 에서는 Rosetta 가 필요함
+// * 이미지를 postgis/postgis:17-3.5 로 둔 이유
+//   place 는 geom geography(Point) 컬럼과 GIST 인덱스를 쓰는데
+//   postgres:17-alpine 에는 PostGIS 확장이 없어
+//   Flyway 가 type "geography" does not exist 로 실패함
+//   compose 의 db 프로파일이 쓰는 이미지와 같은 것이라 개발 DB 와 검증 환경이 일치함
+//   주의: amd64 전용이라 Apple Silicon 에서는 Rosetta 가 필요함
+//        Docker Desktop 의 Settings > General 에서
+//        Use Rosetta for x86_64/amd64 emulation 을 켤 것
+//
+// * asCompatibleSubstituteFor 가 반드시 필요함
+//   PostgreSQLContainer 는 넘긴 이미지가 자기가 아는 postgres 인지 생성자에서 검사하고
+//   이름이 다르면 IllegalStateException 을 던짐
+//   postgis/postgis 는 postgres 위에 확장만 얹은 이미지라 호환되므로 그것을 명시함
+//   DockerImageName 은 org.testcontainers.utility 에 그대로 있음
+//   패키지가 옮겨진 것은 PostgreSQLContainer 쪽임
 //
 // * 컨테이너를 @Bean 이 아니라 정적 필드로 두는 이유
 //   @Bean 메서드로 정의하면 인스턴스가 충분히 이른 시점에 준비되지 않아
@@ -39,13 +51,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 //   PostgreSQLContainer 뒤에 <?> 가 붙어 있으면 옛 클래스를 쓰고 있다는 뜻임
 @SpringBootTest
 @Testcontainers
-class TemplateApplicationTests {
+class PlaceApplicationTests {
+
+    private static final DockerImageName POSTGIS_IMAGE =
+        DockerImageName.parse("postgis/postgis:17-3.5")
+            .asCompatibleSubstituteFor("postgres");
 
     // @ServiceConnection 이 컨테이너의 주소와 계정을 DataSource 에 자동으로 넣어 줌
     // 따라서 테스트 설정 파일에 spring.datasource 를 적지 않음
     @Container
     @ServiceConnection
-    static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
+    static PostgreSQLContainer postgres = new PostgreSQLContainer(POSTGIS_IMAGE);
 
     @Test
     void contextLoads() {
