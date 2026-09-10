@@ -56,7 +56,12 @@ public class PlaceSourceLink extends BaseEntity {
     // 소스가 주는 식별자임
     // 공사와 고캠핑은 contentId, 행정안전부 CSV 는 관리번호임
     // 문화정보원은 식별자 컬럼이 없어 ingest 가 시설명|지번주소 로 만들어 넘김
-    @Column(name = "source_id", nullable = false, updatable = false, length = 100)
+    //
+    // 폭이 200 인 이유는 실측이 상한을 보장하지 않기 때문임
+    // 적재본 전수에서 가장 긴 값이 52 자였으나
+    // 문화정보원 CSV 는 판이 바뀌고 시설명 칸에 설명 문장이 들어간 행이 이미 있음
+    // 넘치면 ingest 청크가 통째로 롤백되어 수집이 멈춤
+    @Column(name = "source_id", nullable = false, updatable = false, length = 200)
     private String sourceId;
 
     // place 본체를 채울 때 이 소스가 이겼는지임
