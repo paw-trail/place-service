@@ -271,6 +271,8 @@ CREATE TABLE place_source_link
     -- 필드 우선순위가 필드 단위가 아니라 소스 단위라는 뜻입니다.
     -- DELETE /admin/places/{id}/sources/{sourceId} 로 대표를 떼면
     -- 나머지 중 하나를 대표로 승격해야 하는데 그 판단에도 씁니다.
+    --
+    -- 장소당 참인 행이 반드시 하나입니다. 아래 부분 UNIQUE 인덱스가 그것을 강제합니다.
     is_primary   boolean       NOT NULL,
 
     -- 어느 단계에서 붙었는지입니다.
@@ -295,6 +297,16 @@ CREATE TABLE place_source_link
     created_by   varchar(45)   NOT NULL,
     updated_at   timestamp     NOT NULL,
     updated_by   varchar(45)   NOT NULL,
+
+    -- 이 테이블에서는 사용하지 않고 항상 NULL 입니다.
+    -- 소스 분리(DELETE /admin/places/{id}/sources/{sourceId})는 행을 실제로 지웁니다.
+    --
+    -- 이 표는 "지금 이 장소가 어느 소스로 이뤄져 있나" 를 담으므로
+    -- 떼어낸 소스는 그 답에 없는 것이 맞습니다.
+    -- 되짚을 근거가 필요하면 ingest 의 raw_document 가 원본을 그대로 갖고 있습니다.
+    --
+    -- 소프트 딜리트로 두면 아래 uq_place_source 에 걸려
+    -- 같은 소스를 다시 붙일 수 없게 되는 것이 결정적인 이유입니다.
     deleted_at   timestamp,
     deleted_by   varchar(45)
 );
@@ -309,6 +321,21 @@ CREATE UNIQUE INDEX uq_place_source
 -- 장소 상세의 sources[] 와 원문 보기가 이 조회를 씁니다.
 CREATE INDEX idx_place_source_link_place
     ON place_source_link (place_id);
+
+-- 대표 소스는 장소당 하나뿐입니다.
+--
+-- 이것이 없으면 같은 place_id 에 is_primary 가 참인 행이 여럿 들어갑니다.
+-- 그러면 place 본체의 이름과 주소가 어느 소스에서 왔는지가 조회 순서에 달리고,
+-- 대표를 떼었을 때 "나머지 중 하나를 승격한다" 는 규칙도 전제를 잃습니다.
+--
+-- 병합을 적재 시점에 즉시 하기로 한 결정이 대표가 하나로 선다는 것에 기대고 있어
+-- 앱이 지키는 것으로는 부족하고 DB 가 막아야 합니다.
+--
+-- 부분 인덱스인 것은 is_primary 가 거짓인 행은 장소당 여럿이기 때문입니다.
+-- 소스 분리가 하드 딜리트라 deleted_at 조건은 넣지 않습니다.
+CREATE UNIQUE INDEX uq_place_source_primary
+    ON place_source_link (place_id)
+    WHERE is_primary;
 
 COMMENT ON TABLE place_source_link IS '장소가 어느 소스에서 왔는지. 병합의 근거입니다.';
 
