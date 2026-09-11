@@ -13,7 +13,6 @@ import com.pawtrail.place.domain.model.Place;
 import com.pawtrail.place.domain.model.PlaceFacility;
 import com.pawtrail.place.domain.model.PlaceSourceLink;
 import com.pawtrail.common.message.outbox.OutboxEventRecorder;
-import com.pawtrail.place.domain.provider.GeocodingProvider;
 import com.pawtrail.place.domain.repository.PlaceFacilityRepository;
 import com.pawtrail.place.domain.repository.PlaceRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceLinkRepository;
@@ -63,13 +62,24 @@ public class PlaceIngestService {
     private final PlaceSourceLinkRepository sourceLinkRepository;
     private final PlaceFacilityRepository facilityRepository;
     private final PlacePendingUpdateService pendingUpdateService;
-    private final GeocodingProvider geocodingProvider;
     private final OutboxEventRecorder outboxEventRecorder;
 
     /**
      * 청크 하나를 적재합니다.
      *
      * 건마다 결과가 다르므로 건수를 세어 돌려줍니다.
+     */
+    /**
+     * 준비가 끝난 청크를 저장합니다.
+     *
+     * 지오코딩은 여기서 하지 않습니다.
+     * 외부 호출이 데이터베이스 커넥션을 붙잡으면 청크를 여러 개 동시에 보낼 때
+     * 커넥션 풀이 그만큼 빨리 마릅니다.
+     * CoordinatePrefiller 가 트랜잭션 밖에서 먼저 채워 주며,
+     * 그 둘을 잇는 것은 PlaceBulkService 입니다.
+     *
+     * 짝의 좌표를 여전히 우선합니다.
+     * 미리 채워 둔 지오코딩 값은 짝이 없을 때 쓰는 폴백입니다.
      */
     @Transactional
     public BulkResult ingest(List<PlaceDraft> drafts) {
@@ -124,6 +134,15 @@ public class PlaceIngestService {
             return Outcome.ofSkipped();
         }
 
+        String tooLong = tooLongField(draft);
+        if (tooLong != null) {
+            // 넘치는 값을 그대로 넣으면 INSERT 가 실패하고 청크 전체가 롤백됩니다
+            // 그 건만 건너뛰면 나머지가 다 들어가고 응답의 skipped 로 드러납니다
+            log.warn("값이 컬럼 폭을 넘어 적재하지 못했습니다: source={}, sourceId={}, field={}",
+                    draft.source(), draft.sourceId(), tooLong);
+            return Outcome.ofSkipped();
+        }
+
         Place incoming = buildPlace(draft, coordinate, nameNormalized, addressNormalized,
                 byAddress.matched() ? byAddress.place() : null);
 
@@ -139,6 +158,21 @@ public class PlaceIngestService {
             return mergeInto(byCoordinate, draft, incoming);
         }
         return createNew(draft, incoming);
+    }
+
+    /**
+     * 컬럼 폭을 넘는 필드가 있는지 봅니다.
+     *
+     * 다듬은 뒤의 값으로 봅니다.
+     * 전화번호는 안내 문구에서 번호만 뽑아 내므로 원본이 길어도 문제가 없고,
+     * 홈페이지와 이미지 주소는 text 라 폭이 없습니다.
+     */
+    private String tooLongField(PlaceDraft draft) {
+        return Place.tooLongField(
+                draft.name(), draft.addressRoad(), draft.addressJibun(),
+                ValueCleaner.extractPhone(draft.tel()),
+                draft.lcls1(), draft.lcls2(), draft.lcls3(),
+                draft.businessHours(), draft.closedDays(), draft.cpyrhtDivCd());
     }
 
     /**
@@ -212,26 +246,25 @@ public class PlaceIngestService {
             return new BigDecimal[]{result.lat(), result.lon()};
         }
 
+        // 짝이 있으면 그쪽 좌표가 답입니다
+        // 1 패스에서 지오코딩을 해 두었더라도 짝의 값을 우선합니다
+        // 소스가 준 주소로 만든 좌표보다 이미 자리 잡은 장소의 좌표가 정확합니다
         if (byAddress.matched()) {
             Place target = byAddress.place();
             return new BigDecimal[]{target.getLat(), target.getLon()};
         }
 
-        String address = draft.addressRoad() != null && !draft.addressRoad().isBlank()
-                ? draft.addressRoad()
-                : draft.addressJibun();
-
-        return geocodingProvider.geocode(address)
-                .map(c -> {
-                    CoordinateNormalizer.Result checked = CoordinateNormalizer.normalize(
-                            c.lat().toPlainString(), c.lon().toPlainString());
-                    // 지오코딩 결과도 범위를 봅니다
-                    // 카카오가 엉뚱한 값을 줄 일은 없으나 검사가 한 곳에 모여 있는 편이 낫습니다
-                    return checked.usable()
-                            ? new BigDecimal[]{checked.lat(), checked.lon()}
-                            : null;
-                })
-                .orElse(null);
+        // 1 패스가 채워 둔 값입니다
+        if (draft.geocodedLat() != null && draft.geocodedLon() != null) {
+            CoordinateNormalizer.Result checked = CoordinateNormalizer.normalize(
+                    draft.geocodedLat().toPlainString(), draft.geocodedLon().toPlainString());
+            // 지오코딩 결과도 범위를 봅니다
+            // 카카오가 엉뚱한 값을 줄 일은 없으나 검사가 한 곳에 모여 있는 편이 낫습니다
+            if (checked.usable()) {
+                return new BigDecimal[]{checked.lat(), checked.lon()};
+            }
+        }
+        return null;
     }
 
     /**
@@ -251,6 +284,7 @@ public class PlaceIngestService {
         if (!original.usable()) {
             return matchedTarget != null ? matchedTarget.getCoordSource() : CoordSource.GEOCODED;
         }
+
         if (draft.coordSource() == null || draft.coordSource().isBlank()) {
             return CoordSource.ORIGINAL;
         }

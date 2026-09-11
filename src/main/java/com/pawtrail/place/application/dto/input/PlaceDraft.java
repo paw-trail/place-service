@@ -1,6 +1,8 @@
 package com.pawtrail.place.application.dto.input;
 
 import com.pawtrail.place.domain.enums.SourceType;
+import com.pawtrail.place.domain.rule.CoordinateNormalizer;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
@@ -60,5 +62,46 @@ public record PlaceDraft(
         String parking,
         String posblFcltyCl,
         String sbrsCl,
-        String resveCl) {
+        String resveCl,
+
+        // 지오코딩으로 미리 채워 둔 좌표입니다
+        //
+        // 요청에는 없는 값이고 적재 1 패스가 넣습니다.
+        // 외부 호출을 데이터베이스 트랜잭션 밖에서 끝내기 위한 자리입니다.
+        // 소스가 준 좌표가 쓸 만하거나 지오코딩도 실패하면 null 입니다.
+        BigDecimal geocodedLat,
+        BigDecimal geocodedLon) {
+
+    /**
+     * 지오코딩 결과를 채운 사본을 만듭니다.
+     *
+     * record 라 값을 바꿀 수 없으므로 새로 만듭니다.
+     * 원본을 그대로 두는 편이 1 패스와 2 패스가 같은 것을 보게 해 줍니다.
+     */
+    public PlaceDraft withGeocoded(BigDecimal foundLat, BigDecimal foundLon) {
+        return new PlaceDraft(
+                source, sourceId, name, addressRoad, addressJibun, sidoName,
+                lat, lon, coordSource, lcls1, lcls2, lcls3,
+                tel, homepage, imageUrl, cpyrhtDivCd, overview,
+                businessHours, closedDays, reservationUrl, dataBaseDate,
+                parking, posblFcltyCl, sbrsCl, resveCl,
+                foundLat, foundLon);
+    }
+
+    /**
+     * 지오코딩이 필요한 건인지 봅니다.
+     *
+     * 소스가 준 좌표를 쓸 수 있으면 부를 이유가 없습니다.
+     * 적재본에서 이 조건에 걸리는 것이 아홉 건이었습니다.
+     */
+    public boolean needsGeocoding() {
+        return !CoordinateNormalizer.normalize(lat, lon).usable();
+    }
+
+    /**
+     * 지오코딩에 넘길 주소입니다. 도로명이 없으면 지번을 씁니다.
+     */
+    public String geocodingAddress() {
+        return addressRoad != null && !addressRoad.isBlank() ? addressRoad : addressJibun;
+    }
 }

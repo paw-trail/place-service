@@ -85,12 +85,15 @@ public record PlaceBulkRequest(
             String resveCl) {
 
         public PlaceDraft toDraft() {
+            // 마지막 둘은 지오코딩 결과 자리입니다
+            // 요청에는 없는 값이고 적재 1 단계가 채웁니다
             return new PlaceDraft(
                     source, sourceId, name, addressRoad, addressJibun, sidoName,
                     lat, lon, coordSource, lcls1, lcls2, lcls3,
                     tel, homepage, imageUrl, cpyrhtDivCd, overview,
                     businessHours, closedDays, reservationUrl, dataBaseDate,
-                    parking, posblFcltyCl, sbrsCl, resveCl);
+                    parking, posblFcltyCl, sbrsCl, resveCl,
+                    null, null);
         }
     }
 

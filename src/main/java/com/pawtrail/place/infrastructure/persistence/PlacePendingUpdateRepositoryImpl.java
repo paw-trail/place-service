@@ -23,6 +23,11 @@ public class PlacePendingUpdateRepositoryImpl implements PlacePendingUpdateRepos
     }
 
     @Override
+    public PlacePendingUpdate saveAndFlush(PlacePendingUpdate pendingUpdate) {
+        return placePendingUpdateJpaRepository.saveAndFlush(pendingUpdate);
+    }
+
+    @Override
     public Optional<PlacePendingUpdate> findById(UUID id) {
         return placePendingUpdateJpaRepository.findById(id);
     }

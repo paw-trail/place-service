@@ -428,6 +428,81 @@ public class Place extends BaseEntity {
         }
     }
 
+    /**
+     * 컬럼 폭입니다. 저장하기 전에 넘치는 값을 가려내는 데 씁니다.
+     *
+     * 여기에 두는 이유는 폭을 아는 곳이 이 클래스이기 때문입니다.
+     * 서비스가 숫자를 따로 들고 있으면 컬럼을 넓힐 때 두 곳을 고쳐야 하고,
+     * 한쪽을 잊으면 넘치는 값이 다시 데이터베이스까지 내려갑니다.
+     */
+    private static final int NAME_MAX = 200;
+    private static final int ADDRESS_MAX = 300;
+    private static final int TEL_MAX = 30;
+    private static final int LCLS1_MAX = 100;
+    private static final int LCLS_MAX = 30;
+    private static final int BUSINESS_HOURS_MAX = 600;
+    private static final int CLOSED_DAYS_MAX = 200;
+    private static final int CPYRHT_MAX = 10;
+
+    /**
+     * 폭을 넘는 필드가 있으면 그 이름을 돌려줍니다. 없으면 null 입니다.
+     *
+     * 저장하기 전에 부릅니다.
+     * 넘치는 값을 그대로 넣으면 INSERT 가 실패하고 청크 전체가 롤백되어
+     * 멀쩡한 999 건까지 못 들어갑니다.
+     *
+     * 값을 잘라 담지 않습니다.
+     * 잘린 안내문이 사용자에게 보이는 편이 안 보이는 것보다 나쁩니다.
+     * 전화번호에서 "잘린 번호는 담지 않는다" 로 정한 것과 같은 기준입니다.
+     *
+     * 요청 검증으로 막지 않는 이유도 같습니다.
+     * 그쪽에서 막으면 한 건 때문에 청크 전체가 400 이 되어 재시도가 통째로 필요해집니다.
+     * 건너뛰면 그 건만 빠지고 응답의 skipped 로 드러납니다.
+     *
+     * lat 과 lon 은 보지 않습니다. 정규화가 이미 자릿수를 맞춰 둡니다.
+     * overview 와 homepage 는 text 라 폭이 없습니다.
+     */
+    public static String tooLongField(String name, String addressRoad, String addressJibun,
+                                      String tel, String lcls1, String lcls2, String lcls3,
+                                      String businessHours, String closedDays,
+                                      String cpyrhtDivCd) {
+        if (over(name, NAME_MAX)) {
+            return "name";
+        }
+        if (over(addressRoad, ADDRESS_MAX)) {
+            return "address_road";
+        }
+        if (over(addressJibun, ADDRESS_MAX)) {
+            return "address_jibun";
+        }
+        if (over(tel, TEL_MAX)) {
+            return "tel";
+        }
+        if (over(lcls1, LCLS1_MAX)) {
+            return "lcls1";
+        }
+        if (over(lcls2, LCLS_MAX)) {
+            return "lcls2";
+        }
+        if (over(lcls3, LCLS_MAX)) {
+            return "lcls3";
+        }
+        if (over(businessHours, BUSINESS_HOURS_MAX)) {
+            return "business_hours";
+        }
+        if (over(closedDays, CLOSED_DAYS_MAX)) {
+            return "closed_days";
+        }
+        if (over(cpyrhtDivCd, CPYRHT_MAX)) {
+            return "cpyrht_div_cd";
+        }
+        return null;
+    }
+
+    private static boolean over(String value, int max) {
+        return value != null && value.length() > max;
+    }
+
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
     }

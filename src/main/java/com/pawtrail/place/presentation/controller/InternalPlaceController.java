@@ -2,7 +2,7 @@ package com.pawtrail.place.presentation.controller;
 
 import com.pawtrail.common.response.CommonApiResponse;
 import com.pawtrail.place.application.dto.output.BulkResult;
-import com.pawtrail.place.application.service.PlaceIngestService;
+import com.pawtrail.place.application.service.PlaceBulkService;
 import com.pawtrail.place.presentation.request.PlaceBulkRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class InternalPlaceController {
 
-    private final PlaceIngestService placeIngestService;
+    private final PlaceBulkService placeBulkService;
 
     /**
      * 수집 결과를 적재합니다.
@@ -43,7 +43,7 @@ public class InternalPlaceController {
     public ResponseEntity<CommonApiResponse<BulkResult>> bulk(
             @Valid @RequestBody PlaceBulkRequest request) {
 
-        BulkResult result = placeIngestService.ingest(request.toDrafts());
+        BulkResult result = placeBulkService.ingest(request.toDrafts());
 
         log.info("적재했습니다: 요청={} 신규={} 병합={} 건너뜀={} 대기={} 대기실패={}",
                 request.items().size(), result.created(), result.merged(),

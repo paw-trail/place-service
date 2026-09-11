@@ -48,7 +48,12 @@ public class PlacePendingUpdateService {
     public boolean record(UUID placeId, String fieldName,
                           String currentValue, String newValue, SourceType source) {
         try {
-            pendingUpdateRepository.save(
+            // saveAndFlush 인 이유는 예외가 나는 시점 때문입니다
+            //
+            // save 만 부르면 실제 INSERT 가 커밋 시점으로 밀려
+            // 그때 터진 예외는 이 try 블록을 이미 빠져나온 뒤라 잡히지 않습니다
+            // 그러면 REQUIRES_NEW 로 뺀 뜻이 없어지고 바깥 트랜잭션까지 함께 죽습니다
+            pendingUpdateRepository.saveAndFlush(
                     PlacePendingUpdate.detect(placeId, fieldName, currentValue, newValue, source));
             return true;
         } catch (Exception e) {

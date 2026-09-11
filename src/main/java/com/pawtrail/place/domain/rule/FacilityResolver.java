@@ -30,7 +30,14 @@ public final class FacilityResolver {
     //
     // "불가능" 과 "불가" 가 섞여 오므로 앞에서 먼저 걸러야 합니다
     // "불가능" 안에 "가능" 이 들어 있어 순서가 뒤집히면 정반대로 판정됩니다
-    private static final Pattern PARKING_UNAVAILABLE = Pattern.compile("^불가|^N$");
+    //
+    // 앞머리 고정을 걸지 않습니다
+    // 값이 "불가" 로 시작한다는 보장이 없어 "주차 불가능" 같은 형태가 오면
+    // 이 무늬에 안 걸리고 아래 "가능" 에 걸려 정반대가 됩니다
+    // 적재본에는 그 형태가 없었으나 자유 텍스트라 언제든 올 수 있습니다
+    //
+    // N 만 고정을 두는 이유는 한 글자라 다른 말에 섞여 들어갈 수 있기 때문입니다
+    private static final Pattern PARKING_UNAVAILABLE = Pattern.compile("불가|^N$");
 
     // 고캠핑이 값을 쉼표나 빗금으로 이어 붙여 줍니다
     private static final Pattern DELIMITER = Pattern.compile("[,/]");
