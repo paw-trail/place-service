@@ -176,10 +176,16 @@ public class Place extends BaseEntity {
     @Column(name = "overview", columnDefinition = "text")
     private String overview;
 
-    @Column(name = "business_hours", length = 200)
+    // 공사가 주는 값이 "시간" 이 아니라 안내문임
+    // 월별로 운항 시각이 다른 유람선이나 계절별로 나뉘는 시설이
+    // [1월]- 첫출발 10:30- 정상출발 ... [2월]- ... 형태로 옴
+    // 실측 최장이 553 자였음
+    @Column(name = "business_hours", length = 600)
     private String businessHours;
 
-    @Column(name = "closed_days", length = 100)
+    // restdate 자체는 최장 96 자이나 분류마다 필드 이름이 갈려
+    // restdateculture 나 restdatefood 가 더 긴 경우가 있음
+    @Column(name = "closed_days", length = 200)
     private String closedDays;
 
     // 폐업해도 행을 지우지 않고 이 값으로 표시함

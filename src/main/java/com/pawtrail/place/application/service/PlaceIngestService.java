@@ -92,7 +92,7 @@ public class PlaceIngestService {
     }
 
     private Outcome ingestOne(PlaceDraft draft) {
-        // 이미 붙어 있는 소스면 아무것도 하지 않습니다
+        // 이미 붙어 있는 소스면 값만 갱신합니다
         //
         // 재수집이 멱등이 되는 자리입니다
         // 같은 결과를 여러 번 밀어 넣어도 uq_place_source 까지 가지 않습니다
@@ -102,8 +102,21 @@ public class PlaceIngestService {
             return updateExisting(draft, existing.get());
         }
 
-        Place incoming = normalize(draft);
-        if (incoming == null) {
+        String nameNormalized = NameNormalizer.normalize(draft.name());
+        String addressNormalized = AddressNormalizer.normalize(
+                draft.addressRoad(), draft.addressJibun(), draft.sidoName());
+
+        // 주소로 먼저 찾습니다. 좌표가 없어도 됩니다
+        //
+        // 주소가 병합 일 순위 키인데 좌표가 없다는 이유로 이 판정을 못 하면 순서가 거꾸로입니다.
+        // 소스가 준 좌표가 망가진 행이 주소로는 짝을 찾을 수 있는 경우가 실제로 있었습니다.
+        // 기흥레스피아호수공원이 공사에서는 좌표가 필리핀 앞바다로 오는데
+        // 문화정보원에 같은 도로명 주소로 정상 좌표가 있었습니다.
+        PlaceMatcher.Match byAddress = PlaceMatcher.matchByAddress(
+                nameNormalized, placeRepository.findByAddressNormalized(addressNormalized));
+
+        BigDecimal[] coordinate = resolveCoordinate(draft, byAddress);
+        if (coordinate == null) {
             // 좌표를 끝내 만들지 못한 행입니다
             // lat 과 lon 이 NOT NULL 이라 넣을 값이 없습니다
             log.warn("좌표가 없어 적재하지 못했습니다: source={}, sourceId={}, name={}",
@@ -111,9 +124,19 @@ public class PlaceIngestService {
             return Outcome.ofSkipped();
         }
 
-        PlaceMatcher.Match match = findMatch(incoming);
-        if (match.matched()) {
-            return mergeInto(match, draft, incoming);
+        Place incoming = buildPlace(draft, coordinate, nameNormalized, addressNormalized,
+                byAddress.matched() ? byAddress.place() : null);
+
+        if (byAddress.matched()) {
+            return mergeInto(byAddress, draft, incoming);
+        }
+
+        PlaceMatcher.Match byCoordinate = PlaceMatcher.matchByCoordinate(
+                incoming,
+                placeRepository.findNearby(
+                        incoming.getLat(), incoming.getLon(), PlaceMatcher.SEARCH_METERS));
+        if (byCoordinate.matched()) {
+            return mergeInto(byCoordinate, draft, incoming);
         }
         return createNew(draft, incoming);
     }
@@ -121,13 +144,15 @@ public class PlaceIngestService {
     /**
      * 소스가 준 값을 저장할 수 있는 형태로 다듬습니다.
      *
-     * 좌표를 못 만들면 null 입니다. 부르는 쪽이 건너뜁니다.
+     * 좌표와 정규화 값은 이미 만들어 둔 것을 받습니다.
+     * 주소 판정을 좌표보다 먼저 하기 위해 그것들을 바깥에서 계산하기 때문입니다.
+     *
+     * matchedTarget 은 주소로 붙은 상대입니다.
+     * 좌표 출처를 그쪽에서 물려받기 위해 넘깁니다. 아래 resolveCoordSource 를 보십시오.
      */
-    private Place normalize(PlaceDraft draft) {
-        BigDecimal[] coordinate = resolveCoordinate(draft);
-        if (coordinate == null) {
-            return null;
-        }
+    private Place buildPlace(PlaceDraft draft, BigDecimal[] coordinate,
+                             String nameNormalized, String addressNormalized,
+                             Place matchedTarget) {
 
         PlaceType placeType = PlaceTypeMapper.resolve(
                 draft.source(), draft.lcls1(), draft.lcls2(), draft.lcls3());
@@ -135,16 +160,17 @@ public class PlaceIngestService {
         Place place = Place.create(draft.name(), placeType, coordinate[0], coordinate[1]);
 
         place.applyNormalized(
-                NameNormalizer.normalize(draft.name()),
+                nameNormalized,
                 NameNormalizer.extractAliases(draft.name()),
-                AddressNormalizer.normalize(draft.addressRoad(), draft.addressJibun(), draft.sidoName()));
+                addressNormalized);
 
         Sido sido = AddressNormalizer.resolveSidoOnly(
                 draft.addressRoad(), draft.addressJibun(), draft.sidoName());
         place.applyAddress(draft.addressRoad(), draft.addressJibun(),
                 sido == null ? null : sido.code(), null);
 
-        place.applyCoordinate(coordinate[0], coordinate[1], resolveCoordSource(draft, coordinate));
+        place.applyCoordinate(coordinate[0], coordinate[1],
+                resolveCoordSource(draft, matchedTarget));
         place.applyClassification(placeType, draft.lcls1(), draft.lcls2(), draft.lcls3());
 
         String tel = ValueCleaner.extractPhone(draft.tel());
@@ -166,18 +192,29 @@ public class PlaceIngestService {
     /**
      * 쓸 수 있는 좌표를 만듭니다.
      *
-     * 소스가 준 좌표가 대한민국 안이면 그대로 쓰고,
-     * 없거나 범위 밖이면 주소로 지오코딩합니다.
-     * 둘 다 안 되면 null 입니다.
+     * 순서가 셋입니다.
+     *   소스가 준 좌표가 대한민국 안이면 그대로 씁니다
+     *   주소로 이미 짝을 찾았으면 그 장소의 좌표를 물려받습니다
+     *   둘 다 아니면 주소로 지오코딩합니다
      *
-     * 지오코딩을 적재 중에 부르는 이유는 대상이 일곱 건뿐이기 때문입니다.
-     * 별도 배치를 두는 것은 그 건수 때문에 새 장치를 만드는 것이라 과합니다.
+     * 가운데 단계가 중요합니다.
+     * 짝이 이미 있으면 그쪽 좌표가 답이므로 카카오를 부를 이유가 없습니다.
+     * 호출이 줄고, 카카오가 못 찾는 주소여도 병합이 됩니다.
+     * 실제로 멀쩡한 도로명인데 카카오가 못 찾는 행이 있었습니다.
+     *
+     * 병합되면 이 좌표는 place 본체에 반영되지 않습니다.
+     * 짝의 값을 그대로 복사한 것이라 fillEmptyFrom 이 바꿀 것도 없습니다.
      */
-    private BigDecimal[] resolveCoordinate(PlaceDraft draft) {
+    private BigDecimal[] resolveCoordinate(PlaceDraft draft, PlaceMatcher.Match byAddress) {
         CoordinateNormalizer.Result result =
                 CoordinateNormalizer.normalize(draft.lat(), draft.lon());
         if (result.usable()) {
             return new BigDecimal[]{result.lat(), result.lon()};
+        }
+
+        if (byAddress.matched()) {
+            Place target = byAddress.place();
+            return new BigDecimal[]{target.getLat(), target.getLon()};
         }
 
         String address = draft.addressRoad() != null && !draft.addressRoad().isBlank()
@@ -200,16 +237,19 @@ public class PlaceIngestService {
     /**
      * 좌표가 어디서 왔는지 정합니다.
      *
-     * 소스가 준 좌표를 그대로 썼으면 ingest 가 준 값을 믿고,
+     * 소스가 준 좌표를 그대로 썼으면 ingest 가 준 값을 믿습니다.
+     * 주소로 붙은 짝에게서 좌표를 물려받았으면 그쪽의 출처를 함께 물려받습니다.
      * 지오코딩으로 채웠으면 GEOCODED 입니다.
      *
      * 이 값이 다음 병합의 임계값을 가르므로 정확해야 합니다.
+     * 물려받은 좌표에 GEOCODED 를 붙이면 그 장소가 이후 판정에서
+     * 실제보다 넓은 반경으로 다뤄집니다.
      */
-    private CoordSource resolveCoordSource(PlaceDraft draft, BigDecimal[] resolved) {
+    private CoordSource resolveCoordSource(PlaceDraft draft, Place matchedTarget) {
         CoordinateNormalizer.Result original =
                 CoordinateNormalizer.normalize(draft.lat(), draft.lon());
         if (!original.usable()) {
-            return CoordSource.GEOCODED;
+            return matchedTarget != null ? matchedTarget.getCoordSource() : CoordSource.GEOCODED;
         }
         if (draft.coordSource() == null || draft.coordSource().isBlank()) {
             return CoordSource.ORIGINAL;
@@ -220,24 +260,6 @@ public class PlaceIngestService {
             log.warn("알 수 없는 좌표 출처입니다: {}", draft.coordSource());
             return CoordSource.ORIGINAL;
         }
-    }
-
-    /**
-     * 같은 장소를 찾습니다. 주소가 먼저이고 좌표가 나중입니다.
-     *
-     * 적재본에서 병합 쌍 148 개 중 113 개가 주소 단계에서 붙었습니다.
-     * 76% 라 대부분 여기서 끝나 좌표 조회를 부르지 않습니다.
-     */
-    private PlaceMatcher.Match findMatch(Place incoming) {
-        PlaceMatcher.Match byAddress = PlaceMatcher.matchByAddress(
-                incoming, placeRepository.findByAddressNormalized(incoming.getAddressNormalized()));
-        if (byAddress.matched()) {
-            return byAddress;
-        }
-        return PlaceMatcher.matchByCoordinate(
-                incoming,
-                placeRepository.findNearby(
-                        incoming.getLat(), incoming.getLon(), PlaceMatcher.SEARCH_METERS));
     }
 
     private Outcome createNew(PlaceDraft draft, Place incoming) {
@@ -295,10 +317,18 @@ public class PlaceIngestService {
         }
 
         Place target = found.get();
-        Place incoming = normalize(draft);
-        if (incoming == null) {
+        // 이미 붙어 있는 소스라 짝은 target 입니다
+        // 좌표가 망가졌으면 그쪽 값을 물려받습니다
+        BigDecimal[] coordinate = resolveCoordinate(
+                draft, PlaceMatcher.Match.matched(target));
+        if (coordinate == null) {
             return Outcome.ofSkipped();
         }
+        Place incoming = buildPlace(draft, coordinate,
+                NameNormalizer.normalize(draft.name()),
+                AddressNormalizer.normalize(
+                        draft.addressRoad(), draft.addressJibun(), draft.sidoName()),
+                target);
 
         if (target.isAdminLocked()) {
             PendingCount counted = recordPending(target, incoming, draft.source());
