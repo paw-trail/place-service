@@ -64,3 +64,23 @@ eureka:
     # 테스트는 서비스 디스커버리에 참여하지 않음
     # 켜 두면 등록을 시도하다 실패해 로그가 뒤덮임
     enabled: false
+
+app:
+  kakao:
+    # config 2계층의 사본임
+    #
+    # 테스트는 설정 서버를 꺼서 app.kakao 가 하나도 안 내려옴
+    # KakaoProperties 가 비면 기동을 막으므로 여기에 값을 두어야 contextLoads 가 통과함
+    #
+    # 검증을 끄지 않고 값을 채우는 쪽을 택한 이유
+    #   그래야 이 검사가 프로퍼티 바인딩과 빈 생성까지 실제로 확인함
+    #   자동설정을 제외하는 방식은 "빈 배선이 깨졌는지" 를 보는 검증 범위를 줄임
+    #   auth 가 JwtProperties 에서 같은 판단을 했음
+    #
+    # 키는 비워 둠
+    #   실제 키를 요구하면 키가 없는 사람의 빌드가 깨짐
+    #   KakaoProperties 가 키만은 빈 값을 허용하고 usable() 로 가름
+    #   테스트가 카카오를 실제로 부르지도 않음
+    rest-api-key:
+    local-base-url: https://dapi.kakao.com
+    timeout-seconds: 5
