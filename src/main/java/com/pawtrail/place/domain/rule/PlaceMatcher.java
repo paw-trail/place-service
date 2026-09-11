@@ -62,11 +62,24 @@ public final class PlaceMatcher {
      * 정상 상태에서는 하나뿐입니다.
      */
     public static Match matchByAddress(Place incoming, List<Place> candidates) {
-        if (incoming.getNameNormalized() == null || candidates == null) {
+        return matchByAddress(incoming.getNameNormalized(), candidates);
+    }
+
+    /**
+     * 정규화한 이름만으로 주소 후보를 판정합니다.
+     *
+     * 좌표를 아직 모를 때 쓰기 위한 형태입니다.
+     * 주소가 병합 일 순위 키인데 좌표가 없다는 이유로 이 판정을 못 하면 순서가 거꾸로입니다.
+     * 실제로 좌표가 망가진 행이 주소로는 짝을 찾을 수 있는 경우가 있었습니다.
+     *
+     * 이 단계가 이름만 보므로 Place 를 통째로 받을 이유도 없습니다.
+     */
+    public static Match matchByAddress(String nameNormalized, List<Place> candidates) {
+        if (nameNormalized == null || candidates == null) {
             return Match.none();
         }
         for (Place candidate : candidates) {
-            if (sameName(incoming, candidate)) {
+            if (nameNormalized.equals(candidate.getNameNormalized())) {
                 return Match.of(candidate, MatchMethod.ADDRESS, null);
             }
         }
@@ -227,6 +240,17 @@ public final class PlaceMatcher {
 
         static Match of(Place place, MatchMethod method, BigDecimal confidence) {
             return new Match(true, place, method, confidence);
+        }
+
+        /**
+         * 판정을 거치지 않고 이미 아는 짝을 담습니다.
+         *
+         * 이미 붙어 있는 소스가 다시 들어왔을 때 씁니다.
+         * 그때는 찾을 것이 없고 연결이 가리키는 장소가 곧 짝입니다.
+         * 판정 방법과 신뢰도는 처음 붙을 때 정해져 이미 저장돼 있습니다.
+         */
+        public static Match matched(Place place) {
+            return new Match(true, place, null, null);
         }
 
         static Match none() {
