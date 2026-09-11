@@ -319,6 +319,104 @@ public class Place extends BaseEntity {
     }
 
     /**
+     * 비어 있는 칸만 다른 소스의 값으로 채웁니다.
+     *
+     * 이미 값이 있는 칸은 건드리지 않습니다.
+     * 그것이 대표 소스가 이겼다는 뜻입니다.
+     *
+     * 소스가 채우는 칸이 배타적이라 이 메서드가 필요합니다.
+     * 공사 계열은 지번을 하나도 주지 않고 문화정보원은 이미지를 하나도 주지 않습니다.
+     * 대표 값만 쓰면 병합 그룹 146 개 중 119 개가 지번을 잃거나 115 개가 이미지를 잃습니다.
+     * 빈 칸을 채우면 대표를 누구로 하든 채움률이 82.4% 로 같아집니다.
+     *
+     * 채우지 않는 것이 넷입니다.
+     *   name 과 name_normalized   이름이 갈리면 같은 장소로 보지도 않았을 것입니다
+     *   lat 과 lon               NOT NULL 이라 빈 적이 없습니다
+     *   place_type 과 status     NOT NULL 이며 판정은 대표 소스를 따릅니다
+     *   admin_locked 와 supply_point   소스가 주는 값이 아닙니다
+     *
+     * geom 은 여기서 만들지 않습니다.
+     * 좌표를 안 바꾸므로 그대로 두면 되고, 바꾼다면 syncGeom 이 저장 직전에 처리합니다.
+     */
+    public void fillEmptyFrom(Place other) {
+        if (other == null) {
+            return;
+        }
+        if (isBlank(nameAlias) && !isBlank(other.nameAlias)) {
+            this.nameAlias = other.nameAlias;
+        }
+        if (isBlank(addressRoad)) {
+            this.addressRoad = other.addressRoad;
+        }
+        if (isBlank(addressJibun)) {
+            this.addressJibun = other.addressJibun;
+        }
+        // 주소 정규화 값은 도로명이나 지번에서 나온 것이라 함께 옮깁니다
+        // 하나만 채우면 원본 주소와 정규화 값이 서로 다른 소스를 가리키게 됩니다
+        if (isBlank(addressNormalized)) {
+            this.addressNormalized = other.addressNormalized;
+        }
+        if (isBlank(sidoCode)) {
+            this.sidoCode = other.sidoCode;
+        }
+        if (isBlank(sigunguCode)) {
+            this.sigunguCode = other.sigunguCode;
+        }
+        if (isBlank(lcls1)) {
+            this.lcls1 = other.lcls1;
+        }
+        if (isBlank(lcls2)) {
+            this.lcls2 = other.lcls2;
+        }
+        if (isBlank(lcls3)) {
+            this.lcls3 = other.lcls3;
+        }
+        // 전화번호와 그 출처는 짝이라 함께 옮깁니다
+        // 번호만 채우고 출처를 안 채우면 어디서 온 값인지 알 수 없게 됩니다
+        if (isBlank(tel) && !isBlank(other.tel)) {
+            this.tel = other.tel;
+            this.telSource = other.telSource;
+        }
+        if (isBlank(homepage)) {
+            this.homepage = other.homepage;
+        }
+        if (isBlank(reservationUrl)) {
+            this.reservationUrl = other.reservationUrl;
+        }
+        // 사진과 저작권 구분도 짝입니다
+        if (isBlank(imageUrl) && !isBlank(other.imageUrl)) {
+            this.imageUrl = other.imageUrl;
+            this.cpyrhtDivCd = other.cpyrhtDivCd;
+        }
+        if (isBlank(overview)) {
+            this.overview = other.overview;
+        }
+        if (isBlank(businessHours)) {
+            this.businessHours = other.businessHours;
+        }
+        if (isBlank(closedDays)) {
+            this.closedDays = other.closedDays;
+        }
+        if (coordSource == null) {
+            this.coordSource = other.coordSource;
+        }
+        // 기준일은 더 최근 것을 남깁니다
+        // 빈 칸 채우기와 다른 규칙인 이유는 둘 다 값이 있을 때 옛것을 남길 이유가 없기 때문입니다
+        if (other.dataBaseDate != null
+                && (dataBaseDate == null || other.dataBaseDate.isAfter(dataBaseDate))) {
+            this.dataBaseDate = other.dataBaseDate;
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static boolean isBlank(List<String> value) {
+        return value == null || value.isEmpty();
+    }
+
+    /**
      * 관리자가 이 장소를 직접 고쳤음을 표시합니다.
      *
      * 이 뒤로 수집 배치는 이 행을 고치지 않고
