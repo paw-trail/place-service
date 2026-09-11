@@ -103,16 +103,14 @@ public final class PlaceMatcher {
             if (!sameName(incoming, candidate)) {
                 continue;
             }
-            if (bothGeocoded(incoming, candidate)) {
+            MatchMethod method = methodFor(incoming, candidate);
+            if (method == null) {
                 continue;
             }
             Double distance = distanceBetween(incoming, candidate);
             if (distance == null) {
                 continue;
             }
-            MatchMethod method = eitherGeocoded(incoming, candidate)
-                    ? MatchMethod.COORD_GEOCODED
-                    : MatchMethod.COORD_ORIGINAL;
             int limit = method == MatchMethod.COORD_GEOCODED ? GEOCODED_METERS : ORIGINAL_METERS;
             if (distance > limit) {
                 continue;
@@ -161,14 +159,47 @@ public final class PlaceMatcher {
                 && a.getNameNormalized().equals(b.getNameNormalized());
     }
 
-    private static boolean bothGeocoded(Place a, Place b) {
-        return a.getCoordSource() == CoordSource.GEOCODED
-                && b.getCoordSource() == CoordSource.GEOCODED;
-    }
-
-    private static boolean eitherGeocoded(Place a, Place b) {
-        return a.getCoordSource() == CoordSource.GEOCODED
-                || b.getCoordSource() == CoordSource.GEOCODED;
+    /**
+     * 두 장소의 좌표 출처로 판정 방법을 정합니다.
+     *
+     * 병합하지 않을 조합이면 null 입니다.
+     *
+     * 지오코딩끼리는 병합하지 않습니다.
+     * 둘 다 주소에서 만든 값이라 오차가 겹치면
+     * 서로 다른 장소가 같은 좌표로 보입니다.
+     *
+     * 변환 좌표가 낀 조합도 지금은 병합하지 않습니다.
+     * EPSG:5174 에서 4326 으로 옮길 때 변환식이 하나가 아니라
+     * 어느 파라미터를 쓰느냐로 결과가 수 미터에서 수십 미터까지 달라집니다.
+     * 그 오차를 재보기 전에는 임계값을 정할 수 없고,
+     * 원본과 같은 100m 로 뭉뚱그리면 명세가 경고한 그대로가 됩니다.
+     *
+     * 행정안전부 동물병원 CSV 가 유일한 변환 좌표 소스인데 아직 들어오지 않아
+     * 지금 적재본에는 이 조합이 한 건도 없습니다.
+     * ingest 착수 때 실제 오차를 재고 임계값을 정하면서 함께 엽니다.
+     *
+     * 한쪽이 지오코딩이고 다른 쪽이 변환 좌표인 경우는 지오코딩 규칙을 따릅니다.
+     * 그쪽 오차가 이미 더 크므로 300m 안이면 받아들일 만합니다.
+     *
+     * 주소 일치로는 여전히 병합됩니다.
+     * 이 판정은 좌표 단계에만 해당하고 ADDRESS 가 1 순위입니다.
+     */
+    private static MatchMethod methodFor(Place a, Place b) {
+        CoordSource left = a.getCoordSource();
+        CoordSource right = b.getCoordSource();
+        if (left == null || right == null) {
+            return null;
+        }
+        if (left == CoordSource.GEOCODED && right == CoordSource.GEOCODED) {
+            return null;
+        }
+        if (left == CoordSource.GEOCODED || right == CoordSource.GEOCODED) {
+            return MatchMethod.COORD_GEOCODED;
+        }
+        if (left == CoordSource.CONVERTED || right == CoordSource.CONVERTED) {
+            return null;
+        }
+        return MatchMethod.COORD_ORIGINAL;
     }
 
     /**

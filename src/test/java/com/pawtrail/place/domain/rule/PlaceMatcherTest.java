@@ -163,13 +163,71 @@ class PlaceMatcherTest {
         void 지오코딩을_건너뛴다() {
             Place incoming = place("어떤장소", "어떤장소", CoordSource.GEOCODED);
             Place skipped = place("어떤장소", "어떤장소", CoordSource.GEOCODED);
-            Place taken = place("어떤장소", "어떤장소", CoordSource.CONVERTED);
+            Place taken = place("어떤장소", "어떤장소", CoordSource.ORIGINAL);
 
             PlaceMatcher.Match m =
                     PlaceMatcher.matchByCoordinate(incoming, List.of(skipped, taken));
 
             assertThat(m.matched()).isTrue();
             assertThat(m.place()).isSameAs(taken);
+        }
+    }
+
+    @Nested
+    @DisplayName("좌표 출처 조합")
+    class CoordSourceCombination {
+
+        @Test
+        @DisplayName("원본끼리만 COORD_ORIGINAL 이다")
+        void 원본끼리만_ORIGINAL() {
+            Place a = place("어떤장소", "어떤장소", CoordSource.ORIGINAL);
+            Place b = place("어떤장소", "어떤장소", CoordSource.ORIGINAL);
+
+            assertThat(PlaceMatcher.matchByCoordinate(a, List.of(b)).method())
+                    .isEqualTo(MatchMethod.COORD_ORIGINAL);
+        }
+
+        @Test
+        @DisplayName("변환 좌표가 끼면 병합하지 않는다")
+        void 변환_좌표는_보류() {
+            // EPSG:5174 에서 4326 으로 옮길 때 변환식이 하나가 아니라
+            // 어느 파라미터를 쓰느냐로 결과가 수 미터에서 수십 미터까지 달라짐
+            // 그 오차를 재보기 전에는 임계값을 정할 수 없고
+            // 원본과 같은 100m 로 뭉뚱그리면 명세가 경고한 그대로가 됨
+            Place original = place("어떤장소", "어떤장소", CoordSource.ORIGINAL);
+            Place converted = place("어떤장소", "어떤장소", CoordSource.CONVERTED);
+            Place converted2 = place("어떤장소", "어떤장소", CoordSource.CONVERTED);
+
+            assertThat(PlaceMatcher.matchByCoordinate(original, List.of(converted)).matched()).isFalse();
+            assertThat(PlaceMatcher.matchByCoordinate(converted, List.of(original)).matched()).isFalse();
+            assertThat(PlaceMatcher.matchByCoordinate(converted, List.of(converted2)).matched()).isFalse();
+        }
+
+        @Test
+        @DisplayName("지오코딩과 변환 좌표는 지오코딩 규칙을 따른다")
+        void 지오코딩과_변환은_300m() {
+            // 지오코딩 쪽 오차가 이미 더 크므로 300m 안이면 받아들일 만함
+            Place geocoded = place("어떤장소", "어떤장소", CoordSource.GEOCODED, LAT_BASE, LON_BASE);
+            Place converted = place("어떤장소", "어떤장소", CoordSource.CONVERTED, LAT_250M, LON_BASE);
+
+            PlaceMatcher.Match m = PlaceMatcher.matchByCoordinate(geocoded, List.of(converted));
+
+            assertThat(m.matched()).isTrue();
+            assertThat(m.method()).isEqualTo(MatchMethod.COORD_GEOCODED);
+        }
+
+        @Test
+        @DisplayName("좌표 출처가 없으면 병합하지 않는다")
+        void 출처가_없으면_보류() {
+            // 정규화가 좌표를 못 쓴다고 판정한 행이거나 아직 안 채운 행임
+            // 어느 임계값을 쓸지 알 수 없으므로 판정하지 않음
+            Place unknown = Place.create("어떤장소", PlaceType.PARK,
+                    new BigDecimal("37.5000000"), new BigDecimal("127.0000000"));
+            unknown.applyNormalized("어떤장소", List.of(), "서울|종로구계동길37");
+            Place original = place("어떤장소", "어떤장소", CoordSource.ORIGINAL);
+
+            assertThat(PlaceMatcher.matchByCoordinate(unknown, List.of(original)).matched()).isFalse();
+            assertThat(PlaceMatcher.matchByCoordinate(original, List.of(unknown)).matched()).isFalse();
         }
     }
 
