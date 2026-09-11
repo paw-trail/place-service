@@ -4,6 +4,7 @@ import com.pawtrail.place.domain.model.Place;
 import com.pawtrail.place.domain.repository.PlaceRepository;
 import com.pawtrail.place.infrastructure.persistence.jpa.PlaceJpaRepository;
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +28,11 @@ public class PlaceRepositoryImpl implements PlaceRepository {
     @Override
     public Optional<Place> findById(UUID id) {
         return placeJpaRepository.findById(id);
+    }
+
+    @Override
+    public List<Place> findAllById(Collection<UUID> ids) {
+        return placeJpaRepository.findAllById(ids);
     }
 
     @Override

@@ -2,6 +2,7 @@ package com.pawtrail.place.domain.repository;
 
 import com.pawtrail.place.domain.model.Place;
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,6 +23,14 @@ public interface PlaceRepository {
     Place save(Place place);
 
     Optional<Place> findById(UUID id);
+
+    /**
+     * 여러 장소를 식별자로 한 번에 찾습니다. GET /internal/places?ids= 가 씁니다.
+     *
+     * 없는 식별자는 결과에서 빠질 뿐 오류가 아닙니다.
+     * 결과의 순서는 요청과 무관하므로 순서가 필요하면 부르는 쪽이 맞춥니다.
+     */
+    List<Place> findAllById(Collection<UUID> ids);
 
     /**
      * 병합 후보를 주소로 찾습니다. 판정 ADDRESS 단계가 씁니다.
