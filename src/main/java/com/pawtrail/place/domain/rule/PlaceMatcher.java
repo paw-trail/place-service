@@ -31,6 +31,21 @@ public final class PlaceMatcher {
     // 주소를 좌표로 바꾼 값이라 원본보다 오차가 큽니다.
     public static final int GEOCODED_METERS = 300;
 
+    // 후보를 찾을 때 쓰는 반경입니다
+    //
+    // 두 임계값 중 넓은 쪽으로 고정합니다.
+    // 새 레코드의 좌표 출처만 보고 반경을 정하면 판정이 적재 순서에 따라 갈립니다.
+    // 새 레코드가 원본이고 기존 장소가 지오코딩인 쌍은 300m 까지 봐야 하는데
+    // 100m 로 조회하면 후보로 올라오지도 않습니다.
+    // 반대 순서로 들어오면 잡히므로 같은 쌍이 어느 쪽이 먼저냐로 달라집니다.
+    //
+    // 넓게 받아도 거짓 병합이 늘지 않습니다.
+    // 아래 판정이 두 장소의 좌표 출처를 보고 실제 임계값을 다시 적용합니다.
+    public static final int SEARCH_METERS = GEOCODED_METERS;
+
+    // 지구 반지름입니다. 하버사인 거리 계산에 씁니다
+    private static final double EARTH_RADIUS_METERS = 6_371_000d;
+
     private PlaceMatcher() {
     }
 
@@ -61,22 +76,29 @@ public final class PlaceMatcher {
     /**
      * 좌표가 가까운 후보 중에서 같은 장소를 고릅니다.
      *
-     * 이름 일치가 여기서도 전제입니다.
-     * 100m 안에는 서로 다른 장소가 얼마든지 있습니다.
+     * 후보는 SEARCH_METERS 로 넓게 받아 온 것이며 여기서 실제 임계값을 적용합니다.
+     * 두 장소의 좌표 출처가 임계값을 정하므로 후보를 받아본 뒤에야 판정할 수 있습니다.
+     *   둘 다 원본이면 100m
+     *   한쪽만 지오코딩이면 300m
+     *   둘 다 지오코딩이면 병합하지 않음
      *
-     * 지오코딩 좌표끼리는 병합하지 않습니다.
-     * 둘 다 주소에서 만든 값이라 오차가 겹치면 서로 다른 장소가 같은 좌표로 보입니다.
-     * 한쪽만 지오코딩이면 임계값을 넓혀 300m 로 봅니다.
+     * 지오코딩 좌표끼리 병합하지 않는 이유는 둘 다 주소에서 만든 값이라
+     * 오차가 겹치면 서로 다른 장소가 같은 좌표로 보이기 때문입니다.
      *
-     * 거리는 부르는 쪽이 이미 좁혀서 넘깁니다.
-     * 저장소가 ST_DWithin 으로 걸러 주므로 여기서 다시 재지 않습니다.
-     * 다만 어느 임계값으로 걸렀는지는 부르는 쪽이 알아야 하므로
-     * 이 클래스가 그 값을 상수로 들고 있습니다.
+     * 이름 일치가 여기서도 전제입니다. 300m 안에는 서로 다른 장소가 얼마든지 있습니다.
+     *
+     * 가장 가까운 후보를 고릅니다.
+     * 임계값을 통과한 것이 여럿이면 가까운 쪽이 같은 장소일 가능성이 높습니다.
      */
     public static Match matchByCoordinate(Place incoming, List<Place> candidates) {
         if (incoming.getNameNormalized() == null || candidates == null) {
             return Match.none();
         }
+
+        Place best = null;
+        double bestDistance = Double.MAX_VALUE;
+        MatchMethod bestMethod = null;
+
         for (Place candidate : candidates) {
             if (!sameName(incoming, candidate)) {
                 continue;
@@ -84,25 +106,54 @@ public final class PlaceMatcher {
             if (bothGeocoded(incoming, candidate)) {
                 continue;
             }
+            Double distance = distanceBetween(incoming, candidate);
+            if (distance == null) {
+                continue;
+            }
             MatchMethod method = eitherGeocoded(incoming, candidate)
                     ? MatchMethod.COORD_GEOCODED
                     : MatchMethod.COORD_ORIGINAL;
-            return Match.of(candidate, method, confidenceOf(method));
+            int limit = method == MatchMethod.COORD_GEOCODED ? GEOCODED_METERS : ORIGINAL_METERS;
+            if (distance > limit) {
+                continue;
+            }
+            if (distance < bestDistance) {
+                best = candidate;
+                bestDistance = distance;
+                bestMethod = method;
+            }
         }
-        return Match.none();
+
+        return best == null
+                ? Match.none()
+                : Match.of(best, bestMethod, confidenceOf(bestMethod, bestDistance));
     }
 
     /**
-     * 이 레코드로 좌표 후보를 찾을 때 쓸 반경입니다.
+     * 두 장소 사이의 거리를 미터로 잽니다.
      *
-     * 지오코딩 좌표면 넓게 찾습니다.
-     * 상대가 원본 좌표일 수 있고 그때는 300m 까지 보기 때문입니다.
-     * 좁게 찾으면 300m 짝을 아예 후보로 못 받습니다.
+     * 저장소가 ST_DWithin 으로 걸러 주지만 그 결과에는 거리가 없습니다.
+     * 엔티티와 거리를 함께 받으려면 프로젝션을 두어야 하는데
+     * 그러면 엔티티를 다시 조회하거나 필드를 하나씩 옮겨야 합니다.
+     * 후보가 적어 여기서 다시 재는 편이 쌉니다.
+     *
+     * 하버사인 공식입니다. 지구를 구로 보고 두 점 사이의 대원 거리를 구합니다.
+     * ST_Distance 는 타원체로 계산해 수 미터 차이가 날 수 있으나
+     * 임계값이 100m 와 300m 라 판정이 갈릴 만한 차이가 아닙니다.
      */
-    public static int searchRadiusOf(Place incoming) {
-        return incoming.getCoordSource() == CoordSource.GEOCODED
-                ? GEOCODED_METERS
-                : ORIGINAL_METERS;
+    public static Double distanceBetween(Place a, Place b) {
+        if (a.getLat() == null || a.getLon() == null || b.getLat() == null || b.getLon() == null) {
+            return null;
+        }
+        double lat1 = Math.toRadians(a.getLat().doubleValue());
+        double lon1 = Math.toRadians(a.getLon().doubleValue());
+        double lat2 = Math.toRadians(b.getLat().doubleValue());
+        double lon2 = Math.toRadians(b.getLon().doubleValue());
+
+        double sinLat = Math.sin((lat2 - lat1) / 2);
+        double sinLon = Math.sin((lon2 - lon1) / 2);
+        double h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
+        return 2 * EARTH_RADIUS_METERS * Math.asin(Math.sqrt(h));
     }
 
     private static boolean sameName(Place a, Place b) {
@@ -124,12 +175,16 @@ public final class PlaceMatcher {
      * 매칭 신뢰도입니다.
      *
      * 검증할 때 낮은 것부터 뽑아 눈으로 확인하기 위한 값입니다.
+     * 원본 좌표끼리는 거리로 나눕니다. 가까울수록 확실합니다.
+     * 지오코딩이 낀 것은 일괄로 낮게 둡니다. 거리 자체를 덜 믿기 때문입니다.
+     *
      * 주소 일치는 값을 두지 않습니다. 견줄 대상이 없어 항상 같은 숫자가 됩니다.
      */
-    private static BigDecimal confidenceOf(MatchMethod method) {
-        return method == MatchMethod.COORD_GEOCODED
-                ? new BigDecimal("0.60")
-                : new BigDecimal("0.80");
+    private static BigDecimal confidenceOf(MatchMethod method, double distance) {
+        if (method == MatchMethod.COORD_GEOCODED) {
+            return new BigDecimal("0.60");
+        }
+        return distance <= 50 ? new BigDecimal("0.90") : new BigDecimal("0.80");
     }
 
     /**

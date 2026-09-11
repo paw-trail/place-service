@@ -345,22 +345,31 @@ public class Place extends BaseEntity {
         if (isBlank(nameAlias) && !isBlank(other.nameAlias)) {
             this.nameAlias = other.nameAlias;
         }
-        if (isBlank(addressRoad)) {
+        // 주소는 한 덩어리로 옮깁니다
+        //
+        // 정규화 값과 행정 코드가 원본 주소에서 나온 것이라 따로 채우면 안 됩니다
+        // 이쪽에 주소가 있고 정규화 값만 비어 있을 때 저쪽 정규화 값을 가져오면
+        // 원본 주소와 정규화 값이 서로 다른 소스를 가리키게 됩니다
+        // 그 값이 다음 병합의 후보 조회 키라 틀린 키로 매칭하게 됩니다
+        //
+        // 도로명이 없고 지번만 있는 소스가 있어 둘 중 하나라도 비면 옮깁니다
+        // 공사 계열은 지번을 하나도 주지 않고 문화정보원은 도로명이 84% 입니다
+        boolean addressEmpty = isBlank(addressRoad) && isBlank(addressJibun);
+        if (addressEmpty && !(isBlank(other.addressRoad) && isBlank(other.addressJibun))) {
             this.addressRoad = other.addressRoad;
-        }
-        if (isBlank(addressJibun)) {
             this.addressJibun = other.addressJibun;
-        }
-        // 주소 정규화 값은 도로명이나 지번에서 나온 것이라 함께 옮깁니다
-        // 하나만 채우면 원본 주소와 정규화 값이 서로 다른 소스를 가리키게 됩니다
-        if (isBlank(addressNormalized)) {
             this.addressNormalized = other.addressNormalized;
-        }
-        if (isBlank(sidoCode)) {
             this.sidoCode = other.sidoCode;
-        }
-        if (isBlank(sigunguCode)) {
             this.sigunguCode = other.sigunguCode;
+        } else {
+            // 이쪽에 주소가 있으면 비어 있는 쪽만 보탭니다
+            // 정규화 값과 행정 코드는 건드리지 않습니다, 이쪽 주소에서 나온 값이어야 합니다
+            if (isBlank(addressRoad)) {
+                this.addressRoad = other.addressRoad;
+            }
+            if (isBlank(addressJibun)) {
+                this.addressJibun = other.addressJibun;
+            }
         }
         if (isBlank(lcls1)) {
             this.lcls1 = other.lcls1;
@@ -397,7 +406,12 @@ public class Place extends BaseEntity {
         if (isBlank(closedDays)) {
             this.closedDays = other.closedDays;
         }
-        if (coordSource == null) {
+        // 좌표 출처는 좌표가 수치상 같을 때만 옮깁니다
+        //
+        // lat 과 lon 은 NOT NULL 이라 이 메서드에서 바꿀 일이 없습니다
+        // 좌표가 다른데 출처만 가져오면 이 행의 좌표가 어디서 왔는지를 거짓으로 기록하게 됩니다
+        // PlaceMatcher 가 그 값으로 판정 임계값을 가르므로 다음 매칭 결과까지 바뀝니다
+        if (coordSource == null && other.coordSource != null && sameCoordinate(other)) {
             this.coordSource = other.coordSource;
         }
         // 기준일은 더 최근 것을 남깁니다
@@ -414,6 +428,20 @@ public class Place extends BaseEntity {
 
     private static boolean isBlank(List<String> value) {
         return value == null || value.isEmpty();
+    }
+
+    /**
+     * 두 장소의 좌표가 수치상 같은지 봅니다.
+     *
+     * compareTo 로 비교합니다.
+     * equals 는 소수 자릿수까지 같아야 참이라 37.5 와 37.5000000 을 다르게 봅니다.
+     * 정규화에서 일곱 자리로 맞추지만 그에 기대지 않습니다.
+     */
+    private boolean sameCoordinate(Place other) {
+        return lat != null && lon != null
+                && other.lat != null && other.lon != null
+                && lat.compareTo(other.lat) == 0
+                && lon.compareTo(other.lon) == 0;
     }
 
     /**

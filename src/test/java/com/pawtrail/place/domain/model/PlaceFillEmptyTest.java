@@ -137,6 +137,60 @@ class PlaceFillEmptyTest {
     }
 
     @Test
+    @DisplayName("이쪽에 주소가 있으면 저쪽 정규화 값을 가져오지 않는다")
+    void 정규화_값은_주소와_한_덩어리() {
+        // 원본 주소와 정규화 값이 서로 다른 소스를 가리키면
+        // 그 값이 다음 병합의 후보 조회 키라 틀린 키로 매칭하게 됨
+        Place primary = blank("어떤장소");
+        primary.applyAddress("서울특별시 종로구 계동길 37", null, null, null);
+
+        Place other = blank("어떤장소");
+        other.applyAddress("부산광역시 해운대구 해운대로 100", null, "26", "350");
+        other.applyNormalized("어떤장소", List.of(), "부산|해운대구해운대로100");
+
+        primary.fillEmptyFrom(other);
+
+        assertThat(primary.getAddressNormalized()).isNull();
+        assertThat(primary.getSidoCode()).isNull();
+        assertThat(primary.getAddressRoad()).isEqualTo("서울특별시 종로구 계동길 37");
+    }
+
+    @Test
+    @DisplayName("이쪽에 주소가 없으면 정규화 값까지 한 덩어리로 가져온다")
+    void 주소가_없으면_덩어리로() {
+        Place primary = blank("어떤장소");
+
+        Place other = blank("어떤장소");
+        other.applyAddress("부산광역시 해운대구 해운대로 100", "부산광역시 해운대구 우동 1", "26", "350");
+        other.applyNormalized("어떤장소", List.of(), "부산|해운대구해운대로100");
+
+        primary.fillEmptyFrom(other);
+
+        assertThat(primary.getAddressRoad()).isEqualTo("부산광역시 해운대구 해운대로 100");
+        assertThat(primary.getAddressNormalized()).isEqualTo("부산|해운대구해운대로100");
+        assertThat(primary.getSidoCode()).isEqualTo("26");
+        assertThat(primary.getSigunguCode()).isEqualTo("350");
+    }
+
+    @Test
+    @DisplayName("좌표가 다르면 좌표 출처를 가져오지 않는다")
+    void 좌표가_다르면_출처를_안_가져옴() {
+        // 좌표는 그대로 두고 출처만 가져오면 이 행의 좌표가 어디서 왔는지를 거짓으로 기록함
+        // PlaceMatcher 가 그 값으로 판정 임계값을 가르므로 다음 매칭 결과까지 바뀜
+        Place primary = Place.create("어떤장소", PlaceType.PARK,
+                new BigDecimal("37.5000000"), new BigDecimal("127.0000000"));
+
+        Place other = Place.create("어떤장소", PlaceType.PARK,
+                new BigDecimal("35.1000000"), new BigDecimal("129.0000000"));
+        other.applyCoordinate(new BigDecimal("35.1000000"), new BigDecimal("129.0000000"),
+                CoordSource.GEOCODED);
+
+        primary.fillEmptyFrom(other);
+
+        assertThat(primary.getCoordSource()).isNull();
+    }
+
+    @Test
     @DisplayName("null 을 넘겨도 안 깨진다")
     void null_이면_그대로() {
         Place primary = blank("어떤장소");

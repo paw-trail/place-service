@@ -1,6 +1,7 @@
 package com.pawtrail.place.infrastructure.persistence.jpa;
 
 import com.pawtrail.place.domain.model.Place;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -29,9 +30,13 @@ public interface PlaceJpaRepository extends JpaRepository<Place, UUID> {
      * geography 로 형변환하는 이유는 ST_DWithin 이 그 타입일 때 미터로 계산해 주기 때문입니다.
      * geometry 로 두면 거리가 도 단위가 되어 100 을 넘기면 지구 전체가 걸립니다.
      *
+     * 거리를 함께 돌려주지 않습니다.
+     * 엔티티와 스칼라를 같이 받으려면 프로젝션을 두어야 하는데,
+     * 그러면 엔티티를 다시 조회하거나 필드를 하나씩 옮겨야 해서 얻는 것보다 잃는 것이 큽니다.
+     * 거리는 부르는 쪽이 좌표로 다시 계산합니다. 후보가 적어 비용이 없습니다.
+     *
      * 정렬을 두지 않습니다.
-     * 부르는 쪽이 후보를 전부 받아 이름 일치로 거르므로 순서에 뜻이 없습니다.
-     * 다만 결과가 많아질 일이 없습니다. 100m 안에 이름까지 같은 장소가 여럿일 수 없기 때문입니다.
+     * 부르는 쪽이 후보를 전부 받아 이름 일치와 거리로 거르므로 순서에 뜻이 없습니다.
      */
     @Query(value = """
             select * from place p
@@ -40,7 +45,7 @@ public interface PlaceJpaRepository extends JpaRepository<Place, UUID> {
                       ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
                       :meters)
             """, nativeQuery = true)
-    List<Place> findNearby(@Param("lat") java.math.BigDecimal lat,
-                           @Param("lon") java.math.BigDecimal lon,
+    List<Place> findNearby(@Param("lat") BigDecimal lat,
+                           @Param("lon") BigDecimal lon,
                            @Param("meters") int meters);
 }
