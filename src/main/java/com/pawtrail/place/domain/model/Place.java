@@ -319,6 +319,132 @@ public class Place extends BaseEntity {
     }
 
     /**
+     * 비어 있는 칸만 다른 소스의 값으로 채웁니다.
+     *
+     * 이미 값이 있는 칸은 건드리지 않습니다.
+     * 그것이 대표 소스가 이겼다는 뜻입니다.
+     *
+     * 소스가 채우는 칸이 배타적이라 이 메서드가 필요합니다.
+     * 공사 계열은 지번을 하나도 주지 않고 문화정보원은 이미지를 하나도 주지 않습니다.
+     * 대표 값만 쓰면 병합 그룹 146 개 중 119 개가 지번을 잃거나 115 개가 이미지를 잃습니다.
+     * 빈 칸을 채우면 대표를 누구로 하든 채움률이 82.4% 로 같아집니다.
+     *
+     * 채우지 않는 것이 넷입니다.
+     *   name 과 name_normalized   이름이 갈리면 같은 장소로 보지도 않았을 것입니다
+     *   lat 과 lon               NOT NULL 이라 빈 적이 없습니다
+     *   place_type 과 status     NOT NULL 이며 판정은 대표 소스를 따릅니다
+     *   admin_locked 와 supply_point   소스가 주는 값이 아닙니다
+     *
+     * geom 은 여기서 만들지 않습니다.
+     * 좌표를 안 바꾸므로 그대로 두면 되고, 바꾼다면 syncGeom 이 저장 직전에 처리합니다.
+     */
+    public void fillEmptyFrom(Place other) {
+        if (other == null) {
+            return;
+        }
+        if (isBlank(nameAlias) && !isBlank(other.nameAlias)) {
+            this.nameAlias = other.nameAlias;
+        }
+        // 주소는 한 덩어리로 옮깁니다
+        //
+        // 정규화 값과 행정 코드가 원본 주소에서 나온 것이라 따로 채우면 안 됩니다
+        // 이쪽에 주소가 있고 정규화 값만 비어 있을 때 저쪽 정규화 값을 가져오면
+        // 원본 주소와 정규화 값이 서로 다른 소스를 가리키게 됩니다
+        // 그 값이 다음 병합의 후보 조회 키라 틀린 키로 매칭하게 됩니다
+        //
+        // 도로명이 없고 지번만 있는 소스가 있어 둘 중 하나라도 비면 옮깁니다
+        // 공사 계열은 지번을 하나도 주지 않고 문화정보원은 도로명이 84% 입니다
+        boolean addressEmpty = isBlank(addressRoad) && isBlank(addressJibun);
+        if (addressEmpty && !(isBlank(other.addressRoad) && isBlank(other.addressJibun))) {
+            this.addressRoad = other.addressRoad;
+            this.addressJibun = other.addressJibun;
+            this.addressNormalized = other.addressNormalized;
+            this.sidoCode = other.sidoCode;
+            this.sigunguCode = other.sigunguCode;
+        } else {
+            // 이쪽에 주소가 있으면 비어 있는 쪽만 보탭니다
+            // 정규화 값과 행정 코드는 건드리지 않습니다, 이쪽 주소에서 나온 값이어야 합니다
+            if (isBlank(addressRoad)) {
+                this.addressRoad = other.addressRoad;
+            }
+            if (isBlank(addressJibun)) {
+                this.addressJibun = other.addressJibun;
+            }
+        }
+        if (isBlank(lcls1)) {
+            this.lcls1 = other.lcls1;
+        }
+        if (isBlank(lcls2)) {
+            this.lcls2 = other.lcls2;
+        }
+        if (isBlank(lcls3)) {
+            this.lcls3 = other.lcls3;
+        }
+        // 전화번호와 그 출처는 짝이라 함께 옮깁니다
+        // 번호만 채우고 출처를 안 채우면 어디서 온 값인지 알 수 없게 됩니다
+        if (isBlank(tel) && !isBlank(other.tel)) {
+            this.tel = other.tel;
+            this.telSource = other.telSource;
+        }
+        if (isBlank(homepage)) {
+            this.homepage = other.homepage;
+        }
+        if (isBlank(reservationUrl)) {
+            this.reservationUrl = other.reservationUrl;
+        }
+        // 사진과 저작권 구분도 짝입니다
+        if (isBlank(imageUrl) && !isBlank(other.imageUrl)) {
+            this.imageUrl = other.imageUrl;
+            this.cpyrhtDivCd = other.cpyrhtDivCd;
+        }
+        if (isBlank(overview)) {
+            this.overview = other.overview;
+        }
+        if (isBlank(businessHours)) {
+            this.businessHours = other.businessHours;
+        }
+        if (isBlank(closedDays)) {
+            this.closedDays = other.closedDays;
+        }
+        // 좌표 출처는 좌표가 수치상 같을 때만 옮깁니다
+        //
+        // lat 과 lon 은 NOT NULL 이라 이 메서드에서 바꿀 일이 없습니다
+        // 좌표가 다른데 출처만 가져오면 이 행의 좌표가 어디서 왔는지를 거짓으로 기록하게 됩니다
+        // PlaceMatcher 가 그 값으로 판정 임계값을 가르므로 다음 매칭 결과까지 바뀝니다
+        if (coordSource == null && other.coordSource != null && sameCoordinate(other)) {
+            this.coordSource = other.coordSource;
+        }
+        // 기준일은 더 최근 것을 남깁니다
+        // 빈 칸 채우기와 다른 규칙인 이유는 둘 다 값이 있을 때 옛것을 남길 이유가 없기 때문입니다
+        if (other.dataBaseDate != null
+                && (dataBaseDate == null || other.dataBaseDate.isAfter(dataBaseDate))) {
+            this.dataBaseDate = other.dataBaseDate;
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static boolean isBlank(List<String> value) {
+        return value == null || value.isEmpty();
+    }
+
+    /**
+     * 두 장소의 좌표가 수치상 같은지 봅니다.
+     *
+     * compareTo 로 비교합니다.
+     * equals 는 소수 자릿수까지 같아야 참이라 37.5 와 37.5000000 을 다르게 봅니다.
+     * 정규화에서 일곱 자리로 맞추지만 그에 기대지 않습니다.
+     */
+    private boolean sameCoordinate(Place other) {
+        return lat != null && lon != null
+                && other.lat != null && other.lon != null
+                && lat.compareTo(other.lat) == 0
+                && lon.compareTo(other.lon) == 0;
+    }
+
+    /**
      * 관리자가 이 장소를 직접 고쳤음을 표시합니다.
      *
      * 이 뒤로 수집 배치는 이 행을 고치지 않고
