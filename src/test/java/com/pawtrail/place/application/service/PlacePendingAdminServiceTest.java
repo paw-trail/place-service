@@ -100,13 +100,29 @@ class PlacePendingAdminServiceTest {
         verify(placeRepository, never()).findAllById(any());
     }
 
+    @Test
+    @DisplayName("승인하기 전에 장소를 잠근다")
+    void 승인은_장소를_잠근다() {
+        PlacePendingUpdate pending = pending(PENDING_1, "tel", "033-000-0000");
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(pending));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(place()));
+
+        // 주소가 아닌 필드에도 걸어 둠
+        // 짝이 되는 값을 읽는 사이에 관리자 수정이 커밋되면 옛 값을 덮어씀
+        placePendingAdminService.approve(PENDING_1, ADMIN);
+
+        verify(placeRepository).findByIdForUpdate(PLACE_A);
+        verify(placeRepository, never()).findById(any());
+    }
+
     // ── 승인 ─────────────────────────────────────────────────
 
     @Test
     @DisplayName("승인하면 관리자 수정 경로로 그 값을 넘긴다")
     void 승인은_수정_경로를_탄다() {
         PlacePendingUpdate pending = pending(PENDING_1, "tel", "033-000-0000");
-        when(pendingUpdateRepository.findById(PENDING_1)).thenReturn(Optional.of(pending));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(pending));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(place()));
 
         placePendingAdminService.approve(PENDING_1, ADMIN);
 
@@ -121,7 +137,8 @@ class PlacePendingAdminServiceTest {
     @DisplayName("승인하면 처리됨으로 표시한다")
     void 승인_표시() {
         PlacePendingUpdate pending = pending(PENDING_1, "homepage", "https://example.com");
-        when(pendingUpdateRepository.findById(PENDING_1)).thenReturn(Optional.of(pending));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(pending));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(place()));
 
         placePendingAdminService.approve(PENDING_1, ADMIN);
 
@@ -133,7 +150,8 @@ class PlacePendingAdminServiceTest {
     @DisplayName("이름을 승인하면 이름 칸만 세운다")
     void 이름_승인() {
         PlacePendingUpdate pending = pending(PENDING_1, "name", "새 이름");
-        when(pendingUpdateRepository.findById(PENDING_1)).thenReturn(Optional.of(pending));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(pending));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(place()));
 
         placePendingAdminService.approve(PENDING_1, ADMIN);
 
@@ -147,10 +165,10 @@ class PlacePendingAdminServiceTest {
     void 주소를_묶어_승인() {
         PlacePendingUpdate road = pending(PENDING_1, "address_road", "부산광역시 해운대구 해운대해변로 264");
         PlacePendingUpdate jibun = pending(PENDING_2, "address_jibun", "부산광역시 해운대구 중동 1015");
-        when(pendingUpdateRepository.findById(PENDING_1)).thenReturn(Optional.of(road));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(road));
         when(pendingUpdateRepository.findPendingByPlaceIdAndFieldName(PLACE_A, "address_jibun"))
                 .thenReturn(Optional.of(jibun));
-        when(placeRepository.findById(PLACE_A)).thenReturn(Optional.of(place()));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(place()));
 
         placePendingAdminService.approve(PENDING_1, ADMIN);
 
@@ -165,10 +183,10 @@ class PlacePendingAdminServiceTest {
     @DisplayName("짝이 되는 대기 값이 없으면 장소의 지금 값을 쓴다")
     void 짝이_없으면_현재_값() {
         PlacePendingUpdate road = pending(PENDING_1, "address_road", "부산광역시 해운대구 해운대해변로 264");
-        when(pendingUpdateRepository.findById(PENDING_1)).thenReturn(Optional.of(road));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(road));
         when(pendingUpdateRepository.findPendingByPlaceIdAndFieldName(PLACE_A, "address_jibun"))
                 .thenReturn(Optional.empty());
-        when(placeRepository.findById(PLACE_A)).thenReturn(Optional.of(place()));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(place()));
 
         // 짝이 없다는 것은 그 소스가 지번을 바꾸지 않았다는 뜻임
         placePendingAdminService.approve(PENDING_1, ADMIN);
@@ -180,10 +198,10 @@ class PlacePendingAdminServiceTest {
     @DisplayName("지번을 승인해도 도로명이 함께 실린다")
     void 지번을_승인해도_덩어리() {
         PlacePendingUpdate jibun = pending(PENDING_2, "address_jibun", "부산광역시 해운대구 중동 1015");
-        when(pendingUpdateRepository.findById(PENDING_2)).thenReturn(Optional.of(jibun));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_2)).thenReturn(Optional.of(jibun));
         when(pendingUpdateRepository.findPendingByPlaceIdAndFieldName(PLACE_A, "address_road"))
                 .thenReturn(Optional.empty());
-        when(placeRepository.findById(PLACE_A)).thenReturn(Optional.of(place()));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(place()));
 
         placePendingAdminService.approve(PENDING_2, ADMIN);
 
@@ -195,7 +213,7 @@ class PlacePendingAdminServiceTest {
     @Test
     @DisplayName("없는 대기 값은 PENDING_NOT_FOUND 다")
     void 없는_대기_값() {
-        when(pendingUpdateRepository.findById(MISSING)).thenReturn(Optional.empty());
+        when(pendingUpdateRepository.findByIdForUpdate(MISSING)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> placePendingAdminService.approve(MISSING, ADMIN))
                 .isInstanceOf(CustomException.class)
@@ -208,7 +226,7 @@ class PlacePendingAdminServiceTest {
     void 이미_처리된_값() {
         PlacePendingUpdate pending = pending(PENDING_1, "tel", "033-000-0000");
         pending.reject(ADMIN);
-        when(pendingUpdateRepository.findById(PENDING_1)).thenReturn(Optional.of(pending));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(pending));
 
         // 엔티티도 막으나 거기는 IllegalStateException 이라 공통 폴백이 500 을 냄
         assertThatThrownBy(() -> placePendingAdminService.approve(PENDING_1, ADMIN))
@@ -225,7 +243,7 @@ class PlacePendingAdminServiceTest {
     @DisplayName("반려하면 place 를 건드리지 않는다")
     void 반려는_반영하지_않는다() {
         PlacePendingUpdate pending = pending(PENDING_1, "tel", "033-000-0000");
-        when(pendingUpdateRepository.findById(PENDING_1)).thenReturn(Optional.of(pending));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(pending));
 
         placePendingAdminService.reject(PENDING_1, ADMIN);
 
@@ -238,7 +256,7 @@ class PlacePendingAdminServiceTest {
     @DisplayName("주소를 반려해도 짝은 건드리지 않는다")
     void 반려는_필드_단위() {
         PlacePendingUpdate road = pending(PENDING_1, "address_road", "부산광역시 해운대구 해운대해변로 264");
-        when(pendingUpdateRepository.findById(PENDING_1)).thenReturn(Optional.of(road));
+        when(pendingUpdateRepository.findByIdForUpdate(PENDING_1)).thenReturn(Optional.of(road));
 
         // 도로명은 틀렸고 지번은 맞을 수 있어 필드마다 따로 판단함
         placePendingAdminService.reject(PENDING_1, ADMIN);

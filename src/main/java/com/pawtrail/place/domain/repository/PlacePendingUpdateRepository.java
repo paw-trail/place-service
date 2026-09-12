@@ -30,6 +30,18 @@ public interface PlacePendingUpdateRepository {
     Optional<PlacePendingUpdate> findById(UUID id);
 
     /**
+     * 그 대기 값을 잠그고 찾아옵니다.
+     *
+     * 승인과 반려가 씁니다.
+     * 아직 처리하지 않았는지 보고 처리하는 사이를 다른 요청이 끼어들지 못하게 합니다.
+     *
+     * 잠그지 않으면 두 요청이 모두 처리 전이라고 보고 각자 진행합니다.
+     * 하나가 승인하고 하나가 반려하면 place 에는 값이 반영됐는데 행은 반려로 남습니다.
+     * 반려한 값은 다음 수집에서 다시 올라오지 않으므로 그 상태가 그대로 굳습니다.
+     */
+    Optional<PlacePendingUpdate> findByIdForUpdate(UUID id);
+
+    /**
      * 관리자가 처리할 것만 최신순으로 돌려줍니다.
      *
      * GET /api/v1/admin/places/pending 이 씁니다.

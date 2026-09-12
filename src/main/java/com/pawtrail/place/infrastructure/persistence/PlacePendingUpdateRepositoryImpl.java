@@ -37,9 +37,14 @@ public class PlacePendingUpdateRepositoryImpl implements PlacePendingUpdateRepos
     }
 
     @Override
+    public Optional<PlacePendingUpdate> findByIdForUpdate(UUID id) {
+        return placePendingUpdateJpaRepository.findByIdForUpdate(id);
+    }
+
+    @Override
     public Page<PlacePendingUpdate> findPending(Pageable pageable) {
         return placePendingUpdateJpaRepository
-                .findByStatusOrderByDetectedAtDesc(PendingStatus.PENDING, pageable);
+                .findByStatusOrderByDetectedAtDescIdDesc(PendingStatus.PENDING, pageable);
     }
 
     @Override

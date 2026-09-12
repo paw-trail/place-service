@@ -468,11 +468,16 @@ public class PlaceIngestService {
             if (pendingUpdateRepository.existsUnresolved(target.getId(), pair[0], pair[2])) {
                 continue;
             }
-            boolean ok = pendingUpdateService.record(
+            // 중복은 실패가 아님
+            //
+            // 위 검사와 저장 사이에 다른 트랜잭션이 끼어들면 둘 다 통과하는데
+            // 그때는 부분 UNIQUE 인덱스가 막고 여기로 DUPLICATE 가 옴
+            // 만들 필요가 없었던 것이므로 어느 건수에도 세지 않음
+            PlacePendingUpdateService.Result result = pendingUpdateService.record(
                     target.getId(), pair[0], pair[1], pair[2], source);
-            if (ok) {
+            if (result == PlacePendingUpdateService.Result.SAVED) {
                 pending++;
-            } else {
+            } else if (result == PlacePendingUpdateService.Result.FAILED) {
                 failed++;
             }
         }

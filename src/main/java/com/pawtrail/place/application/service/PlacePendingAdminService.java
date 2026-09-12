@@ -91,6 +91,17 @@ public class PlacePendingAdminService {
     public void approve(UUID pendingId, String adminId) {
         PlacePendingUpdate pending = getPending(pendingId);
 
+        // 장소를 먼저 잠급니다
+        //
+        // 주소는 짝이 되는 값을 읽어 함께 넘기는데, 그 사이에 관리자 수정이 커밋되면
+        // 옛 값을 그대로 실어 방금 고친 주소를 덮어씁니다
+        // 읽기와 반영이 한 잠금 안에 있어야 그 틈이 사라집니다
+        //
+        // 주소가 아닌 필드에도 걸어 둡니다
+        // 어느 필드든 아래 update 가 결국 같은 행을 고치므로 잠그는 자리가 같습니다
+        placeRepository.findByIdForUpdate(pending.getPlaceId())
+                .orElseThrow(() -> new CustomException(PlaceErrorCode.PLACE_NOT_FOUND));
+
         Optional<PlacePendingUpdate> companion = findAddressCompanion(pending);
         placeAdminService.update(pending.getPlaceId(), toInput(pending, companion));
 
@@ -131,9 +142,14 @@ public class PlacePendingAdminService {
      * 이미 처리한 것이면 409 입니다.
      * 엔티티도 같은 것을 막으나 거기는 마지막 방어선이라 IllegalStateException 이고,
      * 그대로 두면 공통 폴백이 잡아 500 이 나갑니다.
+     *
+     * 행을 잠그고 읽습니다.
+     * 잠그지 않으면 두 요청이 모두 처리 전이라고 보고 각자 진행합니다.
+     * 하나가 승인하고 하나가 반려하면 place 에는 값이 반영됐는데 행은 반려로 남고,
+     * 반려한 값은 다음 수집에서 다시 올라오지 않으므로 그 상태가 그대로 굳습니다.
      */
     private PlacePendingUpdate getPending(UUID pendingId) {
-        PlacePendingUpdate pending = pendingUpdateRepository.findById(pendingId)
+        PlacePendingUpdate pending = pendingUpdateRepository.findByIdForUpdate(pendingId)
                 .orElseThrow(() -> new CustomException(PlaceErrorCode.PENDING_NOT_FOUND));
         if (pending.getStatus() != PendingStatus.PENDING) {
             throw new CustomException(PlaceErrorCode.PENDING_ALREADY_RESOLVED);
@@ -195,7 +211,8 @@ public class PlacePendingAdminService {
      */
     private PlaceAdminUpdateInput addressInput(PlacePendingUpdate pending,
                                                Optional<PlacePendingUpdate> companion) {
-        Place place = placeRepository.findById(pending.getPlaceId())
+        // 위에서 이미 잠갔으므로 같은 잠금 안에서 읽습니다
+        Place place = placeRepository.findByIdForUpdate(pending.getPlaceId())
                 .orElseThrow(() -> new CustomException(PlaceErrorCode.PLACE_NOT_FOUND));
 
         String companionValue = companion.map(PlacePendingUpdate::getNewValue).orElse(null);
