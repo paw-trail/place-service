@@ -4,8 +4,10 @@ import com.pawtrail.common.response.CommonApiResponse;
 import com.pawtrail.common.response.PageResponse;
 import com.pawtrail.common.security.annotation.CurrentUser;
 import com.pawtrail.common.security.principal.CustomUserPrincipal;
+import com.pawtrail.place.application.dto.output.OutboxMessageOutput;
 import com.pawtrail.place.application.dto.output.PlaceDetailOutput;
 import com.pawtrail.place.application.dto.output.PlacePendingOutput;
+import com.pawtrail.place.application.service.AdminOutboxService;
 import com.pawtrail.place.application.service.PlaceAdminService;
 import com.pawtrail.place.application.service.PlacePendingAdminService;
 import com.pawtrail.place.presentation.request.PlaceAdminUpdateRequest;
@@ -41,6 +43,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminPlaceController {
 
     private final PlaceAdminService placeAdminService;
+    private final AdminOutboxService adminOutboxService;
     private final PlacePendingAdminService placePendingAdminService;
 
     /**
@@ -143,5 +146,34 @@ public class AdminPlaceController {
 
         placePendingAdminService.reject(pendingId, principal.accountId().toString());
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 발행이 끝내 실패해 멈춰 있는 이벤트를 봅니다.
+     *
+     * 아직 재시도 중인 건은 나오지 않습니다.
+     * 비어 있다면 손댈 것이 없다는 뜻입니다.
+     */
+    @GetMapping("/outbox")
+    public ResponseEntity<CommonApiResponse<PageResponse<OutboxMessageOutput>>> findGivenUpOutbox(
+            @PageableDefault(size = 20) Pageable pageable) {
+
+        PageResponse<OutboxMessageOutput> response = adminOutboxService.findGivenUp(pageable);
+        return ResponseEntity.ok(CommonApiResponse.success(response));
+    }
+
+    /**
+     * 한 건을 다시 발행합니다.
+     *
+     * 위 목록의 id 를 그대로 넘깁니다.
+     * 실패하면 성공으로 응답하지 않습니다. 보냈다고 알고 넘어가는 것이
+     * 이 기능이 막으려던 상황 그 자체이기 때문입니다.
+     */
+    @PostMapping("/outbox/{outboxId}/retry")
+    public ResponseEntity<CommonApiResponse<Void>> republishOutbox(
+            @PathVariable UUID outboxId) {
+
+        adminOutboxService.republish(outboxId);
+        return ResponseEntity.ok(CommonApiResponse.success(null));
     }
 }

@@ -83,7 +83,20 @@ public enum PlaceErrorCode implements ErrorCode {
     // * 400 이 아니라 409 인 이유
     //   요청 형식이 틀린 것이 아니라 지금 상태에서 할 수 없는 일임
     //   마지막 소스를 뗄 수 없는 것과 같은 부류임
-    PENDING_ALREADY_RESOLVED(HttpStatus.CONFLICT, "이미 처리된 반영 대기 값입니다.");
+    PENDING_ALREADY_RESOLVED(HttpStatus.CONFLICT, "이미 처리된 반영 대기 값입니다."),
+
+    // 관리자가 누른 재발행이 실패함
+    //
+    // 성공으로 응답하면 안 되는 자리임
+    // 관리자는 보냈다고 알고 넘어가는데 이벤트는 여전히 안 나가며,
+    // 그 상태가 바로 이 기능이 막으려던 것임
+    //
+    // 500 인 것은 사용자가 고칠 수 있는 것이 없기 때문임
+    // 카프카가 죽어 있거나 이벤트 자체에 문제가 있는 경우라 우리가 봐야 함
+    //
+    // auth 의 같은 이름 코드와 값도 문구도 같음
+    // 다섯 서비스의 아웃박스 화면이 한곳에 모이므로 응답이 서로 달라질 이유가 없음
+    OUTBOX_REPUBLISH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "이벤트 재발행에 실패했습니다.");
 
     private final HttpStatus httpStatus;
     private final String message;
