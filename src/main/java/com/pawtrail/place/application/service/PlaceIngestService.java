@@ -28,6 +28,7 @@ import com.pawtrail.place.domain.rule.PlaceTypeMapper;
 import com.pawtrail.place.domain.rule.Sido;
 import com.pawtrail.place.domain.rule.ValueCleaner;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -101,6 +102,11 @@ public class PlaceIngestService {
         int pending = 0;
         int pendingFailed = 0;
 
+        // 어느 소스 레코드가 어느 장소가 됐는지를 모음
+        //
+        // 건너뛴 것은 담기지 않아 요청보다 짧을 수 있음
+        List<BulkResult.SourceLink> links = new ArrayList<>(drafts.size());
+
         for (PlaceDraft draft : drafts) {
             Outcome outcome = ingestOne(draft);
             created += outcome.created();
@@ -108,9 +114,14 @@ public class PlaceIngestService {
             skipped += outcome.skipped();
             pending += outcome.pending();
             pendingFailed += outcome.pendingFailed();
+
+            if (outcome.placeId() != null) {
+                links.add(new BulkResult.SourceLink(
+                        draft.source(), draft.sourceId(), outcome.placeId()));
+            }
         }
 
-        return new BulkResult(created, merged, skipped, pending, pendingFailed);
+        return new BulkResult(created, merged, skipped, pending, pendingFailed, links);
     }
 
     private Outcome ingestOne(PlaceDraft draft) {
@@ -345,7 +356,7 @@ public class PlaceIngestService {
         sourceLinkRepository.save(
                 PlaceSourceLink.createPrimary(saved.getId(), draft.source(), draft.sourceId()));
         replaceFacilities(saved.getId(), draft);
-        return Outcome.ofCreated();
+        return Outcome.ofCreated(saved.getId());
     }
 
     /**
@@ -363,7 +374,7 @@ public class PlaceIngestService {
 
         if (target.isAdminLocked()) {
             PendingCount counted = recordPending(target, incoming, draft.source());
-            return Outcome.ofMerged(counted.pending(), counted.failed());
+            return Outcome.ofMerged(counted.pending(), counted.failed(), target.getId());
         }
 
         // 대표를 가져가야 하면 is_primary 만 옮깁니다
@@ -378,7 +389,7 @@ public class PlaceIngestService {
         placeRepository.save(target);
         replaceFacilities(target.getId(), draft);
         publishUpdated(target.getId());
-        return Outcome.ofMerged();
+        return Outcome.ofMerged(target.getId());
     }
 
     /**
@@ -410,14 +421,14 @@ public class PlaceIngestService {
 
         if (target.isAdminLocked()) {
             PendingCount counted = recordPending(target, incoming, draft.source());
-            return Outcome.ofMerged(counted.pending(), counted.failed());
+            return Outcome.ofMerged(counted.pending(), counted.failed(), target.getId());
         }
 
         target.fillEmptyFrom(incoming);
         placeRepository.save(target);
         replaceFacilities(target.getId(), draft);
         publishUpdated(target.getId());
-        return Outcome.ofMerged();
+        return Outcome.ofMerged(target.getId());
     }
 
     /**
@@ -643,22 +654,33 @@ public class PlaceIngestService {
      * record 는 컴포넌트마다 같은 이름의 접근자를 자동으로 만드는데,
      * 정적 메서드를 같은 이름으로 두면 그 자리를 침범해 컴파일이 막힙니다.
      */
-    private record Outcome(int created, int merged, int skipped, int pending, int pendingFailed) {
+    /**
+     * 한 건을 처리한 결과입니다.
+     *
+     * 식별자를 함께 담습니다.
+     * 부르는 쪽이 자기 표의 place_id 를 채우려면 건수만으로는 알 수 없습니다.
+     *
+     * 건너뛴 경우에만 비어 있습니다.
+     * 장소를 만들지 못했으므로 알려 줄 식별자가 없습니다.
+     * 잠긴 장소는 값을 바꾸지 못했을 뿐 이미 있는 장소에 붙은 것이라 식별자가 있습니다.
+     */
+    private record Outcome(int created, int merged, int skipped, int pending, int pendingFailed,
+                           UUID placeId) {
 
-        static Outcome ofCreated() {
-            return new Outcome(1, 0, 0, 0, 0);
+        static Outcome ofCreated(UUID placeId) {
+            return new Outcome(1, 0, 0, 0, 0, placeId);
         }
 
-        static Outcome ofMerged() {
-            return new Outcome(0, 1, 0, 0, 0);
+        static Outcome ofMerged(UUID placeId) {
+            return new Outcome(0, 1, 0, 0, 0, placeId);
         }
 
-        static Outcome ofMerged(int pending, int pendingFailed) {
-            return new Outcome(0, 1, 0, pending, pendingFailed);
+        static Outcome ofMerged(int pending, int pendingFailed, UUID placeId) {
+            return new Outcome(0, 1, 0, pending, pendingFailed, placeId);
         }
 
         static Outcome ofSkipped() {
-            return new Outcome(0, 0, 1, 0, 0);
+            return new Outcome(0, 0, 1, 0, 0, null);
         }
     }
 }
