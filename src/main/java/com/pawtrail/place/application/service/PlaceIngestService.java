@@ -33,6 +33,8 @@ import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,6 +62,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class PlaceIngestService {
+
+    // 처리 전 대기 값이 중복으로 쌓이지 않게 막는 제약임
+    //
+    // V25 에서 만든 부분 UNIQUE 인덱스의 이름임
+    private static final String PENDING_UNIQUE_CONSTRAINT = "uq_place_pending_unresolved";
 
     private final PlaceRepository placeRepository;
     private final PlaceSourceLinkRepository sourceLinkRepository;
@@ -468,21 +475,68 @@ public class PlaceIngestService {
             if (pendingUpdateRepository.existsUnresolved(target.getId(), pair[0], pair[2])) {
                 continue;
             }
-            // 중복은 실패가 아님
+            // 저장은 별도 트랜잭션에서 하고 실패는 여기서 가름
             //
-            // 위 검사와 저장 사이에 다른 트랜잭션이 끼어들면 둘 다 통과하는데
-            // 그때는 부분 UNIQUE 인덱스가 막고 여기로 DUPLICATE 가 옴
-            // 만들 필요가 없었던 것이므로 어느 건수에도 세지 않음
-            PlacePendingUpdateService.Result result = pendingUpdateService.record(
-                    target.getId(), pair[0], pair[1], pair[2], source);
-            if (result == PlacePendingUpdateService.Result.SAVED) {
-                pending++;
-            } else if (result == PlacePendingUpdateService.Result.FAILED) {
+            // 잡는 자리가 그 트랜잭션 밖이어야 함
+            // 안에서 잡으면 하이버네이트가 되돌릴 수밖에 없다고 표시한 뒤라
+            // 커밋 단계에서 UnexpectedRollbackException 이 나고 이 트랜잭션까지 죽음
+            if (!record(target.getId(), pair[0], pair[1], pair[2], source)) {
                 failed++;
+                continue;
             }
+            pending++;
         }
 
         return new PendingCount(pending, failed);
+    }
+
+    /**
+     * 대기 행 하나를 만들고 결과를 알려 줍니다.
+     *
+     * 참이면 새로 만들었거나 이미 같은 값이 있어 만들 필요가 없었던 것입니다.
+     * 거짓이면 만들지 못한 것이며 응답의 실패 건수로 셉니다.
+     *
+     * 같은 값이 이미 있는 것을 실패로 세지 않습니다.
+     * 위에서 미리 보고 걸렀는데도 여기 걸렸다면
+     * 그 검사와 저장 사이에 다른 트랜잭션이 끼어든 것이고,
+     * 그때는 부분 UNIQUE 인덱스가 막아 결과적으로 바라던 상태가 됩니다.
+     * 관리자가 고칠 것이 생긴 것이 아니므로 실패로 세면 목록을 잘못 읽게 합니다.
+     *
+     * 제약 이름으로 가릅니다.
+     * 같은 예외가 컬럼 폭을 넘겼을 때도 나오는데 그쪽은 관리자가 알아야 할 실패입니다.
+     * 메시지를 뒤지지 않는 것은 그 문구가 데이터베이스와 판에 따라 달라지기 때문입니다.
+     */
+    private boolean record(UUID placeId, String fieldName,
+                           String currentValue, String newValue, SourceType source) {
+        try {
+            pendingUpdateService.record(placeId, fieldName, currentValue, newValue, source);
+            return true;
+        } catch (DataIntegrityViolationException e) {
+            if (isDuplicate(e)) {
+                log.debug("같은 대기 값이 이미 있습니다: placeId={}, field={}", placeId, fieldName);
+                return true;
+            }
+            log.warn("대기 행을 만들지 못했습니다: placeId={}, field={}", placeId, fieldName, e);
+            return false;
+        } catch (Exception e) {
+            log.warn("대기 행을 만들지 못했습니다: placeId={}, field={}", placeId, fieldName, e);
+            return false;
+        }
+    }
+
+    /**
+     * 처리 전 대기 값의 중복 제약을 어긴 것인지 봅니다.
+     *
+     * 하이버네이트가 제약 이름을 담아 주고 스프링이 그것을 감싸 던집니다.
+     * 이름이 다르거나 원인이 그 예외가 아니면 거짓입니다.
+     * 폭 초과처럼 관리자가 알아야 할 실패를 중복으로 삼키지 않기 위해서입니다.
+     *
+     * 정적이며 이 패키지에서 보입니다. 검사가 예외를 만들어 그대로 부를 수 있어야 합니다.
+     */
+    static boolean isDuplicate(DataIntegrityViolationException e) {
+        Throwable cause = e.getCause();
+        return cause instanceof ConstraintViolationException violation
+                && PENDING_UNIQUE_CONSTRAINT.equalsIgnoreCase(violation.getConstraintName());
     }
 
     /**

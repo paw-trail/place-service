@@ -6,7 +6,6 @@ import com.pawtrail.place.domain.repository.PlacePendingUpdateRepository;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,25 +34,6 @@ public class PlacePendingUpdateService {
     private final PlacePendingUpdateRepository pendingUpdateRepository;
 
     /**
-     * 만든 결과입니다.
-     *
-     * 셋으로 가른 이유는 중복이 실패가 아니기 때문입니다.
-     * 같은 값이 이미 있으면 만들 필요가 없었던 것이므로
-     * 응답의 실패 건수에 세면 관리자가 고칠 것이 있는 줄로 읽습니다.
-     */
-    public enum Result {
-
-        // 새로 만듦
-        SAVED,
-
-        // 같은 값이 이미 있어 만들지 않음
-        DUPLICATE,
-
-        // 만들지 못함
-        FAILED
-    }
-
-    /**
      * 대기 행을 하나 만듭니다.
      *
      * 실패해도 영구 손실이 아닙니다.
@@ -64,33 +44,30 @@ public class PlacePendingUpdateService {
      * 잘린 주소를 관리자가 승인하면 place 에 깨진 값이 들어갑니다.
      * 전화번호에서 "잘린 번호는 담지 않는다" 로 정한 것과 같은 기준입니다.
      *
-     * 중복은 실패와 가릅니다.
-     * 부르는 쪽이 같은 값이 있는지 먼저 보지만 그 검사와 이 저장 사이에
-     * 다른 트랜잭션이 끼어들 수 있어 부분 UNIQUE 인덱스가 마지막에 막습니다.
-     * 그때 나는 예외는 "만들 필요가 없었다" 는 뜻이지 고칠 것이 생겼다는 뜻이 아닙니다.
+     * 예외를 여기서 잡지 않습니다.
+     *
+     * 잡으면 오히려 부르는 쪽까지 함께 죽습니다.
+     * 하이버네이트는 내보내기 중에 제약을 어기면 그 세션을 되돌릴 수밖에 없는 상태로 표시합니다.
+     * 여기서 잡고 정상으로 돌아가도 이 메서드를 빠져나갈 때 스프링이 커밋을 시도하다
+     * UnexpectedRollbackException 을 던지고, 그 예외는 부르는 쪽에서 잡히지 않습니다.
+     * 별도 트랜잭션으로 뺀 뜻이 사라집니다.
+     *
+     * 예외를 그대로 내보내면 스프링이 이 트랜잭션만 되돌리고 원래 예외를 다시 던집니다.
+     * 바깥은 별개의 트랜잭션이라 물들지 않으므로 부르는 쪽이 안전하게 잡을 수 있습니다.
+     *
+     * 어떤 실패인지 가르는 일도 부르는 쪽이 합니다.
+     * 같은 값이 이미 있는 것은 만들 필요가 없었다는 뜻이고,
+     * 컬럼 폭을 넘긴 것은 관리자가 알아야 할 실패라 세는 자리가 다릅니다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public Result record(UUID placeId, String fieldName,
-                         String currentValue, String newValue, SourceType source) {
-        try {
-            // saveAndFlush 인 이유는 예외가 나는 시점 때문입니다
-            //
-            // save 만 부르면 실제 INSERT 가 커밋 시점으로 밀려
-            // 그때 터진 예외는 이 try 블록을 이미 빠져나온 뒤라 잡히지 않습니다
-            // 그러면 REQUIRES_NEW 로 뺀 뜻이 없어지고 바깥 트랜잭션까지 함께 죽습니다
-            pendingUpdateRepository.saveAndFlush(
-                    PlacePendingUpdate.detect(placeId, fieldName, currentValue, newValue, source));
-            return Result.SAVED;
-        } catch (DataIntegrityViolationException e) {
-            // 같은 값이 이미 있음
-            //
-            // uq_place_pending_unresolved 가 막은 것임
-            // 컬럼 폭을 넘겨도 같은 예외가 나오나 부르는 쪽이 이미 길이를 보고 거름
-            log.debug("같은 대기 값이 이미 있습니다: placeId={}, field={}", placeId, fieldName);
-            return Result.DUPLICATE;
-        } catch (Exception e) {
-            log.warn("대기 행을 만들지 못했습니다: placeId={}, field={}", placeId, fieldName, e);
-            return Result.FAILED;
-        }
+    public void record(UUID placeId, String fieldName,
+                       String currentValue, String newValue, SourceType source) {
+        // saveAndFlush 인 이유는 예외가 나는 시점 때문임
+        //
+        // save 만 부르면 실제 INSERT 가 커밋 시점으로 밀림
+        // 그러면 이 트랜잭션을 되돌리는 과정에서 예외가 나 부르는 쪽이 종류를 가릴 수 없음
+        // 여기서 내보내야 어떤 제약을 어겼는지가 그대로 부르는 쪽에 도착함
+        pendingUpdateRepository.saveAndFlush(
+                PlacePendingUpdate.detect(placeId, fieldName, currentValue, newValue, source));
     }
 }
