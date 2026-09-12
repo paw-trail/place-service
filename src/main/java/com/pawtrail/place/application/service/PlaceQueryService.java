@@ -80,7 +80,7 @@ public class PlaceQueryService {
         if (ids.isEmpty()) {
             return List.of();
         }
-cls
+
         Map<UUID, Place> found = placeRepository.findAllById(ids).stream()
                 .collect(Collectors.toMap(Place::getId, Function.identity()));
 
