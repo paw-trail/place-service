@@ -81,8 +81,7 @@ public class PlaceQueryService {
             return List.of();
         }
 
-        Map<UUID, cls
-        Place> found = placeRepository.findAllById(ids).stream()
+        Map<UUID, Place> found = placeRepository.findAllById(ids).stream()
                 .collect(Collectors.toMap(Place::getId, Function.identity()));
 
         List<PlaceSummaryOutput> result = new ArrayList<>();
