@@ -35,6 +35,12 @@ public class PlaceSourceLinkRepositoryImpl implements PlaceSourceLinkRepository 
     }
 
     @Override
+    public void deleteAndFlush(PlaceSourceLink link) {
+        placeSourceLinkJpaRepository.delete(link);
+        placeSourceLinkJpaRepository.flush();
+    }
+
+    @Override
     public Optional<PlaceSourceLink> findBySourceAndSourceId(SourceType source, String sourceId) {
         return placeSourceLinkJpaRepository.findBySourceAndSourceId(source, sourceId);
     }

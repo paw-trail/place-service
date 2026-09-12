@@ -15,6 +15,7 @@ import com.pawtrail.place.domain.model.PlaceSourceLink;
 import com.pawtrail.common.message.outbox.OutboxEventRecorder;
 import com.pawtrail.place.domain.repository.PlaceFacilityRepository;
 import com.pawtrail.place.domain.repository.PlaceRepository;
+import com.pawtrail.place.domain.repository.PlaceSourceDetachRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceLinkRepository;
 import com.pawtrail.place.domain.rule.AddressNormalizer;
 import com.pawtrail.place.domain.rule.CoordinateNormalizer;
@@ -28,6 +29,7 @@ import com.pawtrail.place.domain.rule.ValueCleaner;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -60,6 +62,7 @@ public class PlaceIngestService {
 
     private final PlaceRepository placeRepository;
     private final PlaceSourceLinkRepository sourceLinkRepository;
+    private final PlaceSourceDetachRepository sourceDetachRepository;
     private final PlaceFacilityRepository facilityRepository;
     private final PlacePendingUpdateService pendingUpdateService;
     private final OutboxEventRecorder outboxEventRecorder;
@@ -116,6 +119,17 @@ public class PlaceIngestService {
         String addressNormalized = AddressNormalizer.normalize(
                 draft.addressRoad(), draft.addressJibun(), draft.sidoName());
 
+        // 관리자가 이 소스 레코드를 떼어낸 장소임
+        //
+        // 한 번만 읽어 아래 두 매칭 단계에 함께 씀
+        // 주소에만 걸면 좌표로 되돌아옴
+        // 같은 건물이면 좌표가 몇 미터 안이라 ST_DWithin 반경에 그대로 들어옴
+        //
+        // 이 조회가 적재 건마다 돌지만 인덱스를 타는 데다
+        // 이 표는 관리자가 손댄 만큼만 커서 대개 비어 있음
+        List<UUID> detached =
+                sourceDetachRepository.findDetachedPlaceIds(draft.source(), draft.sourceId());
+
         // 주소로 먼저 찾습니다. 좌표가 없어도 됩니다
         //
         // 주소가 병합 일 순위 키인데 좌표가 없다는 이유로 이 판정을 못 하면 순서가 거꾸로입니다.
@@ -123,7 +137,8 @@ public class PlaceIngestService {
         // 기흥레스피아호수공원이 공사에서는 좌표가 필리핀 앞바다로 오는데
         // 문화정보원에 같은 도로명 주소로 정상 좌표가 있었습니다.
         PlaceMatcher.Match byAddress = PlaceMatcher.matchByAddress(
-                nameNormalized, placeRepository.findByAddressNormalized(addressNormalized));
+                nameNormalized,
+                exclude(placeRepository.findByAddressNormalized(addressNormalized), detached));
 
         BigDecimal[] coordinate = resolveCoordinate(draft, byAddress);
         if (coordinate == null) {
@@ -152,12 +167,32 @@ public class PlaceIngestService {
 
         PlaceMatcher.Match byCoordinate = PlaceMatcher.matchByCoordinate(
                 incoming,
-                placeRepository.findNearby(
-                        incoming.getLat(), incoming.getLon(), PlaceMatcher.SEARCH_METERS));
+                exclude(placeRepository.findNearby(
+                        incoming.getLat(), incoming.getLon(), PlaceMatcher.SEARCH_METERS), detached));
         if (byCoordinate.matched()) {
             return mergeInto(byCoordinate, draft, incoming);
         }
         return createNew(draft, incoming);
+    }
+
+    /**
+     * 관리자가 떼어낸 장소를 후보에서 뺍니다.
+     *
+     * 이것이 없으면 분리가 다음 적재에 되돌려집니다.
+     * 연결 행을 실제로 지우므로 그 소스 레코드는 처음 보는 것이 되어 매처를 다시 타고,
+     * 정규화 주소가 그대로라 같은 장소로 돌아옵니다.
+     *
+     * 걸러 낸 뒤 갈 곳이 없으면 새 장소가 됩니다.
+     * 관리자가 다른 장소라고 판단해 뗀 것이라 그 장소를 없애면 판단과 어긋납니다.
+     * 좌표가 없어 넣을 값이 없는 경우와는 성격이 다릅니다.
+     */
+    private List<Place> exclude(List<Place> candidates, List<UUID> detachedPlaceIds) {
+        if (detachedPlaceIds.isEmpty()) {
+            return candidates;
+        }
+        return candidates.stream()
+                .filter(place -> !detachedPlaceIds.contains(place.getId()))
+                .toList();
     }
 
     /**
@@ -450,7 +485,7 @@ public class PlaceIngestService {
      *
      * 기존 대표를 먼저 내리지 않으면 uq_place_source_primary 에 걸립니다.
      */
-    private void takeOver(java.util.UUID placeId, SourceType source, String sourceId) {
+    private void takeOver(UUID placeId, SourceType source, String sourceId) {
         sourceLinkRepository.findAllByPlaceId(placeId).stream()
                 .filter(PlaceSourceLink::isPrimary)
                 .forEach(link -> {
@@ -472,7 +507,7 @@ public class PlaceIngestService {
      * 삭제와 저장이 같은 트랜잭션 안에 있어야 합니다.
      * 나뉘면 지우기만 하고 넣기가 실패했을 때 편의시설이 통째로 빕니다.
      */
-    private void replaceFacilities(java.util.UUID placeId, PlaceDraft draft) {
+    private void replaceFacilities(UUID placeId, PlaceDraft draft) {
         List<FacilityCode> codes = FacilityResolver.resolve(
                 draft.source(), draft.parking(),
                 draft.posblFcltyCl(), draft.sbrsCl(), draft.resveCl());
@@ -514,7 +549,7 @@ public class PlaceIngestService {
      * place 를 고친 것과 이벤트 행이 한 트랜잭션이라
      * "값은 바뀌었는데 알림이 안 나간" 상태가 원천 차단됩니다.
      */
-    private void publishUpdated(java.util.UUID placeId) {
+    private void publishUpdated(UUID placeId) {
         outboxEventRecorder.record(new PlaceUpdatedEvent(placeId));
     }
 

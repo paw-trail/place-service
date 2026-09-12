@@ -5,6 +5,9 @@ import com.pawtrail.place.domain.enums.CoordSource;
 import com.pawtrail.place.domain.enums.PlaceStatus;
 import com.pawtrail.place.domain.enums.PlaceType;
 import com.pawtrail.place.domain.enums.TelSource;
+import com.pawtrail.place.domain.rule.AddressNormalizer;
+import com.pawtrail.place.domain.rule.NameNormalizer;
+import com.pawtrail.place.domain.rule.Sido;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -523,6 +526,137 @@ public class Place extends BaseEntity {
                 && other.lat != null && other.lon != null
                 && lat.compareTo(other.lat) == 0
                 && lon.compareTo(other.lon) == 0;
+    }
+
+    /**
+     * 관리자가 이름을 고칩니다. 매칭용 파생값을 함께 다시 만듭니다.
+     *
+     * 수집은 이름을 바꾸지 않습니다.
+     * fillEmptyFrom 이 name 을 일부러 건너뛰므로 장소가 생길 때의 값이 그대로 남습니다.
+     * 상호가 바뀐 장소를 고칠 수 있는 경로가 이것 하나입니다.
+     *
+     * 정규화 값과 별칭을 여기서 함께 만드는 이유가 있습니다.
+     * 부르는 쪽에 맡기면 이름만 바뀌고 name_normalized 가 옛 이름으로 남는 상태가 만들어지는데,
+     * 그 값이 병합 판정에 쓰이므로 그 장소만 다음 적재에서 이상해지고 오류는 나지 않습니다.
+     * geom 을 syncGeom 이 저장 직전에 챙기는 것과 같은 이유입니다.
+     *
+     * 별칭도 다시 뽑습니다.
+     * 괄호가 없는 이름으로 고치면 빈 목록이 되어 자연히 비워집니다.
+     * 그대로 두면 옛 이름에서 뽑은 별칭이 새 이름에 붙어 있게 됩니다.
+     *
+     * 매칭 결과가 달라지는 것은 부작용이 아니라 의도입니다.
+     * 관리자가 고친 값이 맞는 값이므로 그 값으로 매칭하는 것이 맞습니다.
+     */
+    public void renameByAdmin(String name) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("name 은 비울 수 없습니다.");
+        }
+        this.name = name;
+        this.nameNormalized = NameNormalizer.normalize(name);
+        this.nameAlias = NameNormalizer.extractAliases(name);
+    }
+
+    /**
+     * 관리자가 주소를 고칩니다. 정규화 값과 시도 코드를 함께 다시 만듭니다.
+     *
+     * 도로명과 지번 중 하나만 있어도 됩니다. 둘 다 비면 거부합니다.
+     *
+     * 받은 둘이 이 장소의 주소 전부가 됩니다. 안 보낸 쪽을 옛 값으로 채우지 않습니다.
+     * 채우면 도로명은 부산인데 지번은 강원도인 상태가 만들어질 수 있고,
+     * 정규화는 도로명을 먼저 보므로 지번만 거짓으로 남습니다.
+     * 부르는 쪽이 둘을 함께 보내게 하는 것으로 그 상태를 막습니다.
+     * 주소가 없으면 address_normalized 도 없어져 그 장소가 주소 매칭에서 통째로 빠지는데,
+     * 관리자 화면의 주소 칸은 고치는 자리이지 지우는 자리가 아닙니다.
+     *
+     * 정규화가 실패해도 거부합니다.
+     * AddressNormalizer 는 시도를 찾지 못하면 null 을 돌려줍니다.
+     * 시도를 빼고 적으면 그렇게 되는데, 그대로 받으면 위와 같은 상태가 됩니다.
+     *
+     * 적재는 같은 경우를 그대로 담습니다. 적재본에 정규화하지 못한 행이 다섯 있습니다.
+     * 기준이 갈리는 이유는 적재가 사람 없이 도는 배치이기 때문입니다.
+     * 여기는 관리자가 화면 앞에 있어 그 자리에서 되돌려 줄 수 있습니다.
+     *
+     * 시군구 코드는 손대지 않습니다.
+     * 주소에서 시군구를 뽑는 함수가 없고 이 서비스에 그 값을 읽는 코드도 없습니다.
+     * 채울 경로 자체가 아직 없어 전 행이 비어 있습니다.
+     */
+    public void changeAddressByAdmin(String addressRoad, String addressJibun) {
+        boolean roadEmpty = addressRoad == null || addressRoad.isBlank();
+        boolean jibunEmpty = addressJibun == null || addressJibun.isBlank();
+        if (roadEmpty && jibunEmpty) {
+            throw new IllegalArgumentException("주소는 비울 수 없습니다.");
+        }
+
+        String normalized = AddressNormalizer.normalize(addressRoad, addressJibun, null);
+        if (normalized == null) {
+            throw new IllegalArgumentException("주소를 정규화할 수 없습니다.");
+        }
+
+        this.addressRoad = roadEmpty ? null : addressRoad;
+        this.addressJibun = jibunEmpty ? null : addressJibun;
+        this.addressNormalized = normalized;
+
+        Sido sido = AddressNormalizer.resolveSidoOnly(addressRoad, addressJibun, null);
+        this.sidoCode = sido == null ? null : sido.code();
+    }
+
+    /**
+     * 관리자가 연락처와 안내 주소를 고칩니다.
+     *
+     * applyContact 와 나눠 둔 이유는 받는 값이 다르기 때문입니다.
+     * 적재는 소스가 준 것을 한 벌로 넣으면서 telSource 와 cpyrhtDivCd 를 함께 채웁니다.
+     * 관리자는 그 둘을 고칠 수 없습니다. 사람이 판단할 값이 아니라 어디서 왔는지의 기록입니다.
+     *
+     * 번호를 바꾸면 출처도 함께 바꿉니다.
+     * 그러지 않으면 관리자가 넣은 번호를 두고 상세 응답이 공사에서 왔다고 말합니다.
+     * 지울 때도 같습니다. 번호 없이 출처만 남으면 어디서 온 값인지를 거짓으로 기록하게 됩니다.
+     * fillEmptyFrom 이 둘을 짝으로 옮기는 것과 같은 기준입니다.
+     *
+     * 사진을 고쳐도 저작권 구분은 건드리지 않습니다.
+     * 값이 남아 있는 쪽이 나은지 지우는 쪽이 나은지 판단할 근거가 없고,
+     * 화면에 그 값을 쓰는 자리가 아직 없습니다.
+     */
+    public void changeTelByAdmin(String tel) {
+        if (tel == null || tel.isBlank()) {
+            this.tel = null;
+            this.telSource = null;
+            return;
+        }
+        this.tel = tel;
+        this.telSource = TelSource.MANUAL;
+    }
+
+    public void changeHomepageByAdmin(String homepage) {
+        this.homepage = blankToNull(homepage);
+    }
+
+    public void changeReservationUrlByAdmin(String reservationUrl) {
+        this.reservationUrl = blankToNull(reservationUrl);
+    }
+
+    public void changeImageUrlByAdmin(String imageUrl) {
+        this.imageUrl = blankToNull(imageUrl);
+    }
+
+    public void changeOverviewByAdmin(String overview) {
+        this.overview = blankToNull(overview);
+    }
+
+    public void changeBusinessHoursByAdmin(String businessHours) {
+        this.businessHours = blankToNull(businessHours);
+    }
+
+    public void changeClosedDaysByAdmin(String closedDays) {
+        this.closedDays = blankToNull(closedDays);
+    }
+
+    // 빈 문자열을 null 로 바꿈
+    //
+    // 화면이 칸을 비워 보내면 "" 가 오는데 DB 에는 null 로 있어야 함
+    // 둘이 섞이면 값이 없다는 사실을 두 가지로 표현하게 되어
+    // 조회하는 쪽이 매번 둘 다 검사해야 함
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     /**
