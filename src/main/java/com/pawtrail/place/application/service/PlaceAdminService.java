@@ -149,7 +149,15 @@ public class PlaceAdminService {
      */
     @Transactional
     public void detachSource(UUID placeId, UUID sourceLinkId, String adminId) {
-        if (placeRepository.findById(placeId).isEmpty()) {
+        // 장소 행을 잠그고 시작함
+        //
+        // 세기와 지우기 사이를 다른 요청이 끼어들지 못하게 함
+        // 잠그지 않으면 두 요청이 각각 소스가 둘이라고 보고 서로 다른 연결을 지워
+        // 소스가 없는 장소가 남음
+        //
+        // 연결 표가 아니라 장소를 잠금
+        // 세는 대상이 그 장소의 연결 전체라 어느 한 행을 잠가서는 막을 수 없음
+        if (placeRepository.findByIdForUpdate(placeId).isEmpty()) {
             throw new CustomException(PlaceErrorCode.PLACE_NOT_FOUND);
         }
 

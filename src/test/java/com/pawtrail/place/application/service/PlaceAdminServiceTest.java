@@ -115,6 +115,19 @@ class PlaceAdminServiceTest {
     }
 
     @Test
+    @DisplayName("전화번호를 바꾸면 출처가 MANUAL 이 된다")
+    void 전화번호를_바꾸면_출처도_바뀐다() {
+        Place place = filled();
+        givenPlace(place);
+
+        // 그러지 않으면 관리자가 넣은 번호를 두고 상세 응답이 공사에서 왔다고 말함
+        placeAdminService.update(PLACE_A, only(builder -> builder.tel("031-000-0000")));
+
+        assertThat(place.getTel()).isEqualTo("031-000-0000");
+        assertThat(place.getTelSource()).isEqualTo(TelSource.MANUAL);
+    }
+
+    @Test
     @DisplayName("이름을 고치면 정규화 값과 별칭을 다시 만든다")
     void 이름의_파생값() {
         Place place = filled();
@@ -264,7 +277,7 @@ class PlaceAdminServiceTest {
     void 남의_연결() {
         PlaceSourceLink foreign = link(LINK_1, SourceType.PET_TOUR, "126508", true);
         setField(foreign, "placeId", MISSING);
-        when(placeRepository.findById(PLACE_A)).thenReturn(Optional.of(filled()));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(filled()));
         when(sourceLinkRepository.findById(LINK_1)).thenReturn(Optional.of(foreign));
 
         assertThatThrownBy(() -> placeAdminService.detachSource(PLACE_A, LINK_1, ADMIN))
@@ -298,7 +311,7 @@ class PlaceAdminServiceTest {
      * 안 쓰는 것까지 세우면 Mockito 가 불필요한 스텁으로 보고 검사를 실패시킵니다.
      */
     private void givenLinks(UUID targetId, PlaceSourceLink... links) {
-        when(placeRepository.findById(PLACE_A)).thenReturn(Optional.of(filled()));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(filled()));
         for (PlaceSourceLink link : links) {
             if (link.getId().equals(targetId)) {
                 when(sourceLinkRepository.findById(targetId)).thenReturn(Optional.of(link));

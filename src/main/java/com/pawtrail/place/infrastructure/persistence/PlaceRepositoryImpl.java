@@ -31,6 +31,11 @@ public class PlaceRepositoryImpl implements PlaceRepository {
     }
 
     @Override
+    public Optional<Place> findByIdForUpdate(UUID id) {
+        return placeJpaRepository.findByIdForUpdate(id);
+    }
+
+    @Override
     public List<Place> findAllById(Collection<UUID> ids) {
         return placeJpaRepository.findAllById(ids);
     }

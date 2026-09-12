@@ -56,8 +56,14 @@ public class PlaceAdminUpdateRequest {
     //
     // 정규화 값과 시도 코드가 둘에서 함께 나오므로 따로 다루면
     // 한쪽만 바뀐 주소에서 정규화 값을 만들게 됨
-    // 둘 중 하나만 보내도 주소를 고치는 것으로 취급함
+    // 둘 중 하나라도 오면 주소를 고치는 것으로 보고, 아래 검증이 둘 다 왔는지 봄
     private boolean addressProvided;
+
+    // 어느 쪽이 왔는지를 따로 기억함
+    // 한쪽만 보낸 요청을 걸러 내는 데에만 쓰고 서비스로는 넘기지 않음
+    private boolean addressRoadProvided;
+
+    private boolean addressJibunProvided;
 
     @Size(max = 30, message = "전화번호는 30자를 넘을 수 없습니다.")
     private String tel;
@@ -110,12 +116,14 @@ public class PlaceAdminUpdateRequest {
     public void setAddressRoad(String addressRoad) {
         this.addressRoad = addressRoad;
         this.addressProvided = true;
+        this.addressRoadProvided = true;
     }
 
     @JsonProperty("addressJibun")
     public void setAddressJibun(String addressJibun) {
         this.addressJibun = addressJibun;
         this.addressProvided = true;
+        this.addressJibunProvided = true;
     }
 
     @JsonProperty("tel")
@@ -209,6 +217,25 @@ public class PlaceAdminUpdateRequest {
         }
         return (addressRoad != null && !addressRoad.isBlank())
                 || (addressJibun != null && !addressJibun.isBlank());
+    }
+
+    /**
+     * 주소를 고칠 때 도로명과 지번을 함께 보내게 합니다.
+     *
+     * 한쪽만 보내면 나머지가 지워집니다. 안 보낸 쪽을 옛 값으로 채우지 않기 때문입니다.
+     *
+     * 채우는 쪽을 택하지 않은 이유가 있습니다.
+     * 도로명을 부산으로 고쳤는데 지번에 강원도가 남으면 두 값이 다른 곳을 가리키는데,
+     * 정규화는 도로명을 먼저 보므로 부산으로 맞춰지고 지번만 거짓으로 남습니다.
+     * 정규화 값과 시도 코드가 두 주소에서 함께 나오므로 주소는 덩어리 단위로 다룹니다.
+     *
+     * 지번이 없는 장소는 명시적으로 null 을 보내면 됩니다.
+     * 공사 계열은 지번을 하나도 주지 않아 그런 장소가 많습니다.
+     * 화면이 칸 둘을 함께 보내면 자연스럽게 그 형태가 됩니다.
+     */
+    @AssertTrue(message = "주소를 고칠 때는 도로명과 지번을 함께 보내야 합니다.")
+    public boolean isAddressSentTogether() {
+        return !addressProvided || (addressRoadProvided && addressJibunProvided);
     }
 
     /**

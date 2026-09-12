@@ -1,10 +1,13 @@
 package com.pawtrail.place.infrastructure.persistence.jpa;
 
 import com.pawtrail.place.domain.model.Place;
+import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -13,6 +16,20 @@ import org.springframework.data.repository.query.Param;
  * 이 파일은 도메인이 보지 않습니다.
  */
 public interface PlaceJpaRepository extends JpaRepository<Place, UUID> {
+
+    /**
+     * 그 장소 행에 쓰기 잠금을 걸고 읽습니다.
+     *
+     * 다른 트랜잭션이 같은 행을 잠그려 하면 이쪽이 끝날 때까지 기다립니다.
+     * 소스 분리에서 세기와 지우기 사이를 막는 데 씁니다.
+     *
+     * SKIP LOCKED 를 쓰지 않습니다.
+     * common 의 아웃박스는 잠긴 것을 건너뛰고 다음 것을 집는 것이 맞지만,
+     * 여기는 지정한 장소 하나를 다뤄야 해서 건너뛰면 할 일이 없어집니다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Place p where p.id = :id")
+    Optional<Place> findByIdForUpdate(@Param("id") UUID id);
 
     List<Place> findByAddressNormalized(String addressNormalized);
 

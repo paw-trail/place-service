@@ -20,5 +20,16 @@ public enum TelSource {
     MOIS_VET,
 
     // 카카오 로컬 API 로 보완한 값
-    KAKAO
+    KAKAO,
+
+    // 관리자가 직접 넣은 값
+    //
+    // PATCH /admin/places/{placeId} 로 번호를 고치면 이 값이 됨
+    // 소스가 준 값이 아니므로 SourceType 과 짝이 맞지 않는 유일한 값임
+    //
+    // * null 로 두지 않는 이유
+    //   null 은 "소스가 번호를 안 줬다" 는 뜻으로 이미 쓰이고 있음
+    //   관리자가 넣은 값을 거기 섞으면 둘을 가를 수 없게 됨
+    //   policy 가 관리자 정정을 pet_policy_source 의 MANUAL 티어로 남기는 것과 같은 축임
+    MANUAL
 }
