@@ -67,7 +67,23 @@ public enum PlaceErrorCode implements ErrorCode {
     // * 적재는 같은 경우를 그대로 담음.  적재본에 정규화하지 못한 행이 다섯 있음
     //   기준이 갈리는 이유는 적재가 사람 없이 도는 배치이기 때문임
     //   여기는 관리자가 화면 앞에 있어 그 자리에서 되돌려 줄 수 있음
-    PLACE_ADDRESS_INVALID(HttpStatus.BAD_REQUEST, "주소를 정규화할 수 없습니다. 시도부터 적어 주세요.");
+    PLACE_ADDRESS_INVALID(HttpStatus.BAD_REQUEST, "주소를 정규화할 수 없습니다. 시도부터 적어 주세요."),
+
+    // 그 반영 대기 값이 없음
+    //
+    // POST /admin/places/pending/{id}/approve 와 /reject 가 냄
+    // 목록이 낡아 이미 사라진 것을 누른 경우임
+    PENDING_NOT_FOUND(HttpStatus.NOT_FOUND, "반영 대기 값을 찾을 수 없습니다."),
+
+    // 이미 승인하거나 반려한 값임
+    //
+    // 엔티티도 같은 것을 막으나 거기는 마지막 방어선이라 IllegalStateException 임
+    // 그대로 두면 공통 폴백이 잡아 500 이 나가므로 서비스가 먼저 막음
+    //
+    // * 400 이 아니라 409 인 이유
+    //   요청 형식이 틀린 것이 아니라 지금 상태에서 할 수 없는 일임
+    //   마지막 소스를 뗄 수 없는 것과 같은 부류임
+    PENDING_ALREADY_RESOLVED(HttpStatus.CONFLICT, "이미 처리된 반영 대기 값입니다.");
 
     private final HttpStatus httpStatus;
     private final String message;

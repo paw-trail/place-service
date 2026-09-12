@@ -63,7 +63,17 @@ public class PlaceAdminService {
      */
     @Transactional
     public PlaceDetailOutput update(UUID placeId, PlaceAdminUpdateInput input) {
-        Place place = placeRepository.findById(placeId)
+        // 장소 행을 잠그고 읽습니다
+        //
+        // 잠그지 않으면 두 요청이 같은 장소를 각자 읽어 각자 고칩니다
+        // 뒤에 커밋한 쪽이 앞의 수정을 통째로 덮어쓰는데 오류가 나지 않습니다
+        //
+        // admin_locked 은 이것을 막아 주지 못합니다
+        // 그 값은 수집 배치가 이 행을 건드리지 않게 하는 표시이지 데이터베이스 잠금이 아닙니다
+        //
+        // 반영 대기 값을 승인하는 경로도 같은 장소를 잠그고 들어옵니다
+        // 한 트랜잭션에서 두 번 잠그는 것은 두 번째가 아무 일도 하지 않아 겹쳐도 됩니다
+        Place place = placeRepository.findByIdForUpdate(placeId)
                 .orElseThrow(() -> new CustomException(PlaceErrorCode.PLACE_NOT_FOUND));
 
         // 이름과 주소는 파생값을 함께 다시 만듦

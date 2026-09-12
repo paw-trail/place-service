@@ -201,7 +201,7 @@ class PlaceAdminServiceTest {
     @Test
     @DisplayName("없는 장소는 PLACE_NOT_FOUND 다")
     void 없는_장소_수정() {
-        when(placeRepository.findById(MISSING)).thenReturn(Optional.empty());
+        when(placeRepository.findByIdForUpdate(MISSING)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() ->
                 placeAdminService.update(MISSING, only(builder -> builder.tel("02-000-0000"))))
@@ -301,7 +301,7 @@ class PlaceAdminServiceTest {
     // ── 준비 ─────────────────────────────────────────────────
 
     private void givenPlace(Place place) {
-        when(placeRepository.findById(PLACE_A)).thenReturn(Optional.of(place));
+        when(placeRepository.findByIdForUpdate(PLACE_A)).thenReturn(Optional.of(place));
     }
 
     /**

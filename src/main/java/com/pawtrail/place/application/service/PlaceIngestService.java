@@ -14,6 +14,7 @@ import com.pawtrail.place.domain.model.PlaceFacility;
 import com.pawtrail.place.domain.model.PlaceSourceLink;
 import com.pawtrail.common.message.outbox.OutboxEventRecorder;
 import com.pawtrail.place.domain.repository.PlaceFacilityRepository;
+import com.pawtrail.place.domain.repository.PlacePendingUpdateRepository;
 import com.pawtrail.place.domain.repository.PlaceRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceDetachRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceLinkRepository;
@@ -32,6 +33,8 @@ import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,11 +63,17 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class PlaceIngestService {
 
+    // 처리 전 대기 값이 중복으로 쌓이지 않게 막는 제약임
+    //
+    // V25 에서 만든 부분 UNIQUE 인덱스의 이름임
+    private static final String PENDING_UNIQUE_CONSTRAINT = "uq_place_pending_unresolved";
+
     private final PlaceRepository placeRepository;
     private final PlaceSourceLinkRepository sourceLinkRepository;
     private final PlaceSourceDetachRepository sourceDetachRepository;
     private final PlaceFacilityRepository facilityRepository;
     private final PlacePendingUpdateService pendingUpdateService;
+    private final PlacePendingUpdateRepository pendingUpdateRepository;
     private final OutboxEventRecorder outboxEventRecorder;
 
     /**
@@ -414,12 +423,19 @@ public class PlaceIngestService {
     /**
      * 잠긴 장소에서 달라진 값을 대기 행으로 쌓습니다.
      *
-     * 비교 대상을 일곱으로 둡니다.
+     * 비교 대상을 여덟으로 둡니다.
      *
-     * 이름과 도로명 주소를 넣은 이유가 있습니다.
-     * 이름이 바뀌면 name_normalized 도 바뀌어 다음 병합 판정이 달라지는데,
-     * 잠겨서 반영이 안 되면 그 장소만 옛 이름으로 남아 새 소스와 안 붙습니다.
-     * 주소도 같습니다. address_normalized 가 매칭 일 순위 키입니다.
+     * 이름을 넣은 이유가 있습니다.
+     * 수집은 이름을 바꾸지 않습니다. fillEmptyFrom 이 name 을 일부러 건너뛰기 때문입니다.
+     * 그래서 소스가 다른 이름을 보내도 place 에는 영영 반영되지 않고,
+     * 관리자가 PATCH 로 고치는 것이 유일한 길입니다.
+     * 그 사실을 관리자에게 알리는 자리가 여기입니다.
+     *
+     * 주소는 도로명과 지번을 함께 봅니다.
+     * 둘이 한 덩어리라 도로명만 반영하면 지번이 지워지거나 반쪽 주소에서 정규화 값이 나옵니다.
+     * 지번을 함께 쌓아 두면 승인할 때 묶어 넘길 수 있고,
+     * 지번 대기 값이 없다는 것이 곧 그 소스가 지번을 안 바꿨다는 근거가 됩니다.
+     * address_normalized 가 매칭 일 순위 키라 어느 쪽이 틀려도 다음 병합이 달라집니다.
      *
      * 소개문과 분류는 넣지 않습니다.
      * overview 는 current_value 와 new_value 의 폭인 500 자를 넘겨
@@ -436,6 +452,7 @@ public class PlaceIngestService {
         String[][] pairs = {
                 {"name", target.getName(), incoming.getName()},
                 {"address_road", target.getAddressRoad(), incoming.getAddressRoad()},
+                {"address_jibun", target.getAddressJibun(), incoming.getAddressJibun()},
                 {"tel", target.getTel(), incoming.getTel()},
                 {"homepage", target.getHomepage(), incoming.getHomepage()},
                 {"reservation_url", target.getReservationUrl(), incoming.getReservationUrl()},
@@ -447,16 +464,79 @@ public class PlaceIngestService {
             if (!changed(pair[1], pair[2])) {
                 continue;
             }
-            boolean ok = pendingUpdateService.record(
-                    target.getId(), pair[0], pair[1], pair[2], source);
-            if (ok) {
-                pending++;
-            } else {
-                failed++;
+            // 같은 값이 이미 대기 중이거나 반려된 적이 있으면 건너뜀
+            //
+            // 소스가 값을 고치지 않는 한 같은 차이가 수집마다 발견됨
+            // 그때마다 행을 만들면 목록에 같은 값이 여러 줄 뜨고
+            // 반려한 것도 다시 올라와 관리자가 같은 판단을 되풀이하게 됨
+            //
+            // 승인된 것은 보지 않음
+            // 승인되면 place 의 값이 새 값이 되어 위 changed 가 이미 거름
+            if (pendingUpdateRepository.existsUnresolved(target.getId(), pair[0], pair[2])) {
+                continue;
             }
+            // 저장은 별도 트랜잭션에서 하고 실패는 여기서 가름
+            //
+            // 잡는 자리가 그 트랜잭션 밖이어야 함
+            // 안에서 잡으면 하이버네이트가 되돌릴 수밖에 없다고 표시한 뒤라
+            // 커밋 단계에서 UnexpectedRollbackException 이 나고 이 트랜잭션까지 죽음
+            if (!record(target.getId(), pair[0], pair[1], pair[2], source)) {
+                failed++;
+                continue;
+            }
+            pending++;
         }
 
         return new PendingCount(pending, failed);
+    }
+
+    /**
+     * 대기 행 하나를 만들고 결과를 알려 줍니다.
+     *
+     * 참이면 새로 만들었거나 이미 같은 값이 있어 만들 필요가 없었던 것입니다.
+     * 거짓이면 만들지 못한 것이며 응답의 실패 건수로 셉니다.
+     *
+     * 같은 값이 이미 있는 것을 실패로 세지 않습니다.
+     * 위에서 미리 보고 걸렀는데도 여기 걸렸다면
+     * 그 검사와 저장 사이에 다른 트랜잭션이 끼어든 것이고,
+     * 그때는 부분 UNIQUE 인덱스가 막아 결과적으로 바라던 상태가 됩니다.
+     * 관리자가 고칠 것이 생긴 것이 아니므로 실패로 세면 목록을 잘못 읽게 합니다.
+     *
+     * 제약 이름으로 가릅니다.
+     * 같은 예외가 컬럼 폭을 넘겼을 때도 나오는데 그쪽은 관리자가 알아야 할 실패입니다.
+     * 메시지를 뒤지지 않는 것은 그 문구가 데이터베이스와 판에 따라 달라지기 때문입니다.
+     */
+    private boolean record(UUID placeId, String fieldName,
+                           String currentValue, String newValue, SourceType source) {
+        try {
+            pendingUpdateService.record(placeId, fieldName, currentValue, newValue, source);
+            return true;
+        } catch (DataIntegrityViolationException e) {
+            if (isDuplicate(e)) {
+                log.debug("같은 대기 값이 이미 있습니다: placeId={}, field={}", placeId, fieldName);
+                return true;
+            }
+            log.warn("대기 행을 만들지 못했습니다: placeId={}, field={}", placeId, fieldName, e);
+            return false;
+        } catch (Exception e) {
+            log.warn("대기 행을 만들지 못했습니다: placeId={}, field={}", placeId, fieldName, e);
+            return false;
+        }
+    }
+
+    /**
+     * 처리 전 대기 값의 중복 제약을 어긴 것인지 봅니다.
+     *
+     * 하이버네이트가 제약 이름을 담아 주고 스프링이 그것을 감싸 던집니다.
+     * 이름이 다르거나 원인이 그 예외가 아니면 거짓입니다.
+     * 폭 초과처럼 관리자가 알아야 할 실패를 중복으로 삼키지 않기 위해서입니다.
+     *
+     * 정적이며 이 패키지에서 보입니다. 검사가 예외를 만들어 그대로 부를 수 있어야 합니다.
+     */
+    static boolean isDuplicate(DataIntegrityViolationException e) {
+        Throwable cause = e.getCause();
+        return cause instanceof ConstraintViolationException violation
+                && PENDING_UNIQUE_CONSTRAINT.equalsIgnoreCase(violation.getConstraintName());
     }
 
     /**
