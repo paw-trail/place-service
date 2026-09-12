@@ -34,7 +34,40 @@ public enum PlaceErrorCode implements ErrorCode {
     //   폐업은 행을 지우지 않고 status 를 CLOSED 로 바꿔 표시하므로 200 으로 나감
     //
     // * 이름과 메시지는 common 의 ErrorCode 설명이 예로 든 것과 같음
-    PLACE_NOT_FOUND(HttpStatus.NOT_FOUND, "장소를 찾을 수 없습니다.");
+    PLACE_NOT_FOUND(HttpStatus.NOT_FOUND, "장소를 찾을 수 없습니다."),
+
+    // 그 장소에 그 소스가 붙어 있지 않음
+    //
+    // DELETE /admin/places/{id}/sources/{sourceId} 가 냄
+    // 연결이 다른 장소에 붙어 있거나 이미 떼어진 경우임
+    //
+    // * PLACE_NOT_FOUND 와 가르는 이유
+    //   장소는 있는데 그 소스가 없는 것이라 관리자가 봐야 할 것이 다름
+    //   앞의 것은 주소를 잘못 부른 것이고 이것은 이미 처리됐거나 목록이 낡은 것임
+    PLACE_SOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "그 장소에 묶인 소스가 아닙니다."),
+
+    // 소스가 하나뿐이라 뗄 수 없음
+    //
+    // 이 표는 "지금 이 장소가 어느 소스로 이뤄져 있나" 를 담으므로
+    // 0 개가 되면 그 답이 사라지고 장소의 존재 근거가 없어짐
+    // 허용하면 원문 보기도 비는 유령 장소가 남는데
+    // 즐겨찾기와 후기가 물고 있으면 지울 수도 없음
+    //
+    // * 장소를 없애는 것은 분리가 아니라 별도 기능이며 명세에 그 API 가 없음
+    PLACE_LAST_SOURCE(HttpStatus.CONFLICT, "마지막 소스는 뗄 수 없습니다."),
+
+    // 관리자가 보낸 주소를 정규화하지 못함
+    //
+    // AddressNormalizer 가 시도를 찾지 못하면 답하지 못함
+    // "남정면 양성리" 처럼 시도를 빼고 적으면 그렇게 됨
+    //
+    // * 그대로 받으면 address_normalized 가 비고 그 장소가 주소 매칭에서 통째로 빠짐
+    //   오류가 나지 않아 알아챌 수 없는 자리라 받는 쪽에서 막음
+    //
+    // * 적재는 같은 경우를 그대로 담음.  적재본에 정규화하지 못한 행이 다섯 있음
+    //   기준이 갈리는 이유는 적재가 사람 없이 도는 배치이기 때문임
+    //   여기는 관리자가 화면 앞에 있어 그 자리에서 되돌려 줄 수 있음
+    PLACE_ADDRESS_INVALID(HttpStatus.BAD_REQUEST, "주소를 정규화할 수 없습니다. 시도부터 적어 주세요.");
 
     private final HttpStatus httpStatus;
     private final String message;

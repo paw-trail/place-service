@@ -20,6 +20,20 @@ public interface PlaceSourceLinkRepository {
 
     void delete(PlaceSourceLink link);
 
+    /**
+     * 지우고 그 자리에서 데이터베이스로 내보냅니다.
+     *
+     * 대표 소스를 뗄 때 씁니다.
+     * 떼어낸 뒤 남은 것 중 하나를 대표로 올리는데, 그 순서가 뒤집히면 안 됩니다.
+     *
+     * 하이버네이트는 모아 둔 작업을 내보낼 때 UPDATE 를 DELETE 보다 먼저 실행합니다.
+     * delete 만 부르면 승격 UPDATE 가 먼저 나가 그 순간 대표가 둘이 되고
+     * uq_place_source_primary 에 걸립니다.
+     *
+     * 지우기를 먼저 내보내면 인덱스가 비어 있는 상태에서 승격이 나갑니다.
+     */
+    void deleteAndFlush(PlaceSourceLink link);
+
     // 그 소스 레코드가 이미 어느 장소에 붙어 있는지 찾음
     //
     // 재수집이 멱등이 되는 근거임
