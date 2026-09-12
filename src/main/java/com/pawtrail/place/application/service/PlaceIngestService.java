@@ -14,6 +14,7 @@ import com.pawtrail.place.domain.model.PlaceFacility;
 import com.pawtrail.place.domain.model.PlaceSourceLink;
 import com.pawtrail.common.message.outbox.OutboxEventRecorder;
 import com.pawtrail.place.domain.repository.PlaceFacilityRepository;
+import com.pawtrail.place.domain.repository.PlacePendingUpdateRepository;
 import com.pawtrail.place.domain.repository.PlaceRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceDetachRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceLinkRepository;
@@ -65,6 +66,7 @@ public class PlaceIngestService {
     private final PlaceSourceDetachRepository sourceDetachRepository;
     private final PlaceFacilityRepository facilityRepository;
     private final PlacePendingUpdateService pendingUpdateService;
+    private final PlacePendingUpdateRepository pendingUpdateRepository;
     private final OutboxEventRecorder outboxEventRecorder;
 
     /**
@@ -414,12 +416,19 @@ public class PlaceIngestService {
     /**
      * 잠긴 장소에서 달라진 값을 대기 행으로 쌓습니다.
      *
-     * 비교 대상을 일곱으로 둡니다.
+     * 비교 대상을 여덟으로 둡니다.
      *
-     * 이름과 도로명 주소를 넣은 이유가 있습니다.
-     * 이름이 바뀌면 name_normalized 도 바뀌어 다음 병합 판정이 달라지는데,
-     * 잠겨서 반영이 안 되면 그 장소만 옛 이름으로 남아 새 소스와 안 붙습니다.
-     * 주소도 같습니다. address_normalized 가 매칭 일 순위 키입니다.
+     * 이름을 넣은 이유가 있습니다.
+     * 수집은 이름을 바꾸지 않습니다. fillEmptyFrom 이 name 을 일부러 건너뛰기 때문입니다.
+     * 그래서 소스가 다른 이름을 보내도 place 에는 영영 반영되지 않고,
+     * 관리자가 PATCH 로 고치는 것이 유일한 길입니다.
+     * 그 사실을 관리자에게 알리는 자리가 여기입니다.
+     *
+     * 주소는 도로명과 지번을 함께 봅니다.
+     * 둘이 한 덩어리라 도로명만 반영하면 지번이 지워지거나 반쪽 주소에서 정규화 값이 나옵니다.
+     * 지번을 함께 쌓아 두면 승인할 때 묶어 넘길 수 있고,
+     * 지번 대기 값이 없다는 것이 곧 그 소스가 지번을 안 바꿨다는 근거가 됩니다.
+     * address_normalized 가 매칭 일 순위 키라 어느 쪽이 틀려도 다음 병합이 달라집니다.
      *
      * 소개문과 분류는 넣지 않습니다.
      * overview 는 current_value 와 new_value 의 폭인 500 자를 넘겨
@@ -436,6 +445,7 @@ public class PlaceIngestService {
         String[][] pairs = {
                 {"name", target.getName(), incoming.getName()},
                 {"address_road", target.getAddressRoad(), incoming.getAddressRoad()},
+                {"address_jibun", target.getAddressJibun(), incoming.getAddressJibun()},
                 {"tel", target.getTel(), incoming.getTel()},
                 {"homepage", target.getHomepage(), incoming.getHomepage()},
                 {"reservation_url", target.getReservationUrl(), incoming.getReservationUrl()},
@@ -445,6 +455,17 @@ public class PlaceIngestService {
 
         for (String[] pair : pairs) {
             if (!changed(pair[1], pair[2])) {
+                continue;
+            }
+            // 같은 값이 이미 대기 중이거나 반려된 적이 있으면 건너뜀
+            //
+            // 소스가 값을 고치지 않는 한 같은 차이가 수집마다 발견됨
+            // 그때마다 행을 만들면 목록에 같은 값이 여러 줄 뜨고
+            // 반려한 것도 다시 올라와 관리자가 같은 판단을 되풀이하게 됨
+            //
+            // 승인된 것은 보지 않음
+            // 승인되면 place 의 값이 새 값이 되어 위 changed 가 이미 거름
+            if (pendingUpdateRepository.existsUnresolved(target.getId(), pair[0], pair[2])) {
                 continue;
             }
             boolean ok = pendingUpdateService.record(
