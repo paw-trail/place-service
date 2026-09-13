@@ -31,6 +31,11 @@ public class PlaceRepositoryImpl implements PlaceRepository {
     }
 
     @Override
+    public boolean existsById(UUID id) {
+        return placeJpaRepository.existsById(id);
+    }
+
+    @Override
     public Optional<Place> findByIdForUpdate(UUID id) {
         return placeJpaRepository.findByIdForUpdate(id);
     }

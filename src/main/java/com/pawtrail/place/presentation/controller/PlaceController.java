@@ -2,6 +2,7 @@ package com.pawtrail.place.presentation.controller;
 
 import com.pawtrail.common.response.CommonApiResponse;
 import com.pawtrail.place.application.dto.output.PlaceDetailOutput;
+import com.pawtrail.place.application.dto.output.PlaceDocumentsOutput;
 import com.pawtrail.place.application.service.PlaceQueryService;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -40,5 +41,28 @@ public class PlaceController {
     @GetMapping("/{placeId}")
     public ResponseEntity<CommonApiResponse<PlaceDetailOutput>> getPlace(@PathVariable UUID placeId) {
         return ResponseEntity.ok(CommonApiResponse.success(placeQueryService.getDetail(placeId)));
+    }
+
+    /**
+     * 그 장소가 어느 원본에서 왔는지를 돌려줍니다.
+     *
+     * 상세 화면의 「근거 원문 전체 보기」가 씁니다.
+     * 우리가 여러 소스에서 값을 골라 하나로 합쳐 보여주므로
+     * 어느 소스가 무엇이라고 했는지를 그대로 볼 수 있어야 사용자가 판단할 수 있습니다.
+     * 실제로 같은 장소를 두고 한 소스는 일부구역 동반가능이라 하고
+     * 다른 소스는 동반 불가능이라 하는 곳이 있습니다.
+     *
+     * 원본은 이 서비스가 가지고 있지 않습니다. 받아 온 쪽에 물어 옵니다.
+     *
+     * 장소가 없으면 404 이고, 원본을 가진 쪽을 못 부르면 503 입니다.
+     * 빈 목록으로 돌려주지 않습니다.
+     * 원본을 거치지 않는 소스로만 만들어진 장소는 실제로 빈 목록이 정상이라
+     * 둘을 같은 모양으로 만들면 가를 수 없게 됩니다.
+     */
+    @GetMapping("/{placeId}/documents")
+    public ResponseEntity<CommonApiResponse<PlaceDocumentsOutput>> getDocuments(
+            @PathVariable UUID placeId) {
+
+        return ResponseEntity.ok(CommonApiResponse.success(placeQueryService.getDocuments(placeId)));
     }
 }

@@ -96,7 +96,25 @@ public enum PlaceErrorCode implements ErrorCode {
     //
     // auth 의 같은 이름 코드와 값도 문구도 같음
     // 다섯 서비스의 아웃박스 화면이 한곳에 모이므로 응답이 서로 달라질 이유가 없음
-    OUTBOX_REPUBLISH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "이벤트 재발행에 실패했습니다.");
+    OUTBOX_REPUBLISH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "이벤트 재발행에 실패했습니다."),
+
+    // 원문을 가진 서비스를 부르지 못함
+    //
+    // * 빈 목록으로 돌려주지 않는 이유
+    //   원문이 정말 없는 것과 지금 못 가져오는 것은 다른 상태임
+    //   섞으면 사용자가 "이 장소는 근거가 없구나" 로 잘못 읽는데
+    //   그것은 이 화면이 있는 이유를 정면으로 훼손함
+    //   행안부 동물병원만으로 만들어진 장소는 원본을 안 거쳐 실제로 원문이 없음
+    //
+    // * 화면이 통째로 죽지는 않음
+    //   상세 화면이 판정·후기·집중률·원문을 병렬로 불러 조립하므로
+    //   이 카드만 오류가 되고 나머지는 그대로 뜸
+    //
+    // * 500 이 아니라 503 인 이유
+    //   우리가 고칠 것이 아니라 상대가 지금 없는 것임
+    //   수집 서비스는 상시 기동이 아니라 평소에 안 떠 있는 것이 정상임
+    PLACE_DOCUMENTS_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE, "원문을 지금 가져올 수 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String message;

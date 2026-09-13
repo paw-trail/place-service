@@ -2,13 +2,16 @@ package com.pawtrail.place.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.pawtrail.common.exception.CustomException;
 import com.pawtrail.place.application.dto.output.PlaceDetailOutput;
+import com.pawtrail.place.application.dto.output.PlaceDocumentOutput;
 import com.pawtrail.place.application.dto.output.PlaceSummaryOutput;
 import com.pawtrail.place.domain.enums.FacilityCode;
 import com.pawtrail.place.domain.enums.MatchMethod;
@@ -19,16 +22,20 @@ import com.pawtrail.place.domain.exception.PlaceErrorCode;
 import com.pawtrail.place.domain.model.Place;
 import com.pawtrail.place.domain.model.PlaceFacility;
 import com.pawtrail.place.domain.model.PlaceSourceLink;
+import com.pawtrail.place.domain.provider.PlaceDocumentProvider;
+import com.pawtrail.place.domain.provider.dto.RawDocumentView;
 import com.pawtrail.place.domain.repository.PlaceFacilityRepository;
 import com.pawtrail.place.domain.repository.PlaceRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceLinkRepository;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -64,6 +71,9 @@ class PlaceQueryServiceTest {
 
     @Mock
     private PlaceFacilityRepository placeFacilityRepository;
+
+    @Mock
+    private PlaceDocumentProvider placeDocumentProvider;
 
     @InjectMocks
     private PlaceQueryService placeQueryService;
@@ -239,6 +249,110 @@ class PlaceQueryServiceTest {
      *
      * 식별자는 저장할 때 하이버네이트가 만들어 넣으므로 생성 직후에는 비어 있습니다.
      */
+
+    // ── 원문 보기 ─────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("원문 보기")
+    class 원문_보기 {
+
+        @Test
+        @DisplayName("표시 이름을 붙여 돌려준다")
+        void 표시_이름() {
+            when(placeRepository.existsById(PLACE_A)).thenReturn(true);
+            when(placeDocumentProvider.findByPlaceId(PLACE_A))
+                    .thenReturn(List.of(view("PET_TOUR"), view("CULTURE_CSV")));
+
+            // 상세의 sources[] 가 같은 값을 담으므로 같은 화면에서 모양이 갈리면 안 됨
+            List<PlaceDocumentOutput> documents =
+                    placeQueryService.getDocuments(PLACE_A).documents();
+
+            assertThat(documents).hasSize(2);
+            assertThat(documents.get(0).source()).isEqualTo(SourceType.PET_TOUR);
+            assertThat(documents.get(0).sourceLabel())
+                    .isEqualTo(SourceType.PET_TOUR.label());
+            assertThat(documents.get(1).sourceLabel())
+                    .isEqualTo(SourceType.CULTURE_CSV.label());
+        }
+
+        @Test
+        @DisplayName("받은 순서를 그대로 지킨다")
+        void 순서_유지() {
+            when(placeRepository.existsById(PLACE_A)).thenReturn(true);
+            when(placeDocumentProvider.findByPlaceId(PLACE_A)).thenReturn(
+                    List.of(view("PET_TOUR"), view("GOCAMPING"), view("CULTURE_CSV")));
+
+            // 정렬은 받아 온 쪽이 이미 대표 순서로 맞춰 줌
+            // 여기서 다시 정렬하면 그쪽 규칙이 바뀔 때 두 곳을 고쳐야 함
+            assertThat(placeQueryService.getDocuments(PLACE_A).documents())
+                    .extracting(PlaceDocumentOutput::source)
+                    .containsExactly(
+                            SourceType.PET_TOUR, SourceType.GOCAMPING, SourceType.CULTURE_CSV);
+        }
+
+        @Test
+        @DisplayName("모르는 소스는 그 항목만 뺀다")
+        void 모르는_소스() {
+            when(placeRepository.existsById(PLACE_A)).thenReturn(true);
+            when(placeDocumentProvider.findByPlaceId(PLACE_A))
+                    .thenReturn(List.of(view("PET_TOUR"), view("SOMETHING_NEW")));
+
+            // 한쪽에만 소스가 늘 수 있음
+            // 화면을 통째로 죽이면 볼 수 있는 원문까지 못 보게 됨
+            List<PlaceDocumentOutput> documents =
+                    placeQueryService.getDocuments(PLACE_A).documents();
+
+            assertThat(documents).hasSize(1);
+            assertThat(documents.get(0).source()).isEqualTo(SourceType.PET_TOUR);
+        }
+
+        @Test
+        @DisplayName("원문이 없으면 빈 목록이다")
+        void 빈_목록() {
+            when(placeRepository.existsById(PLACE_A)).thenReturn(true);
+            when(placeDocumentProvider.findByPlaceId(PLACE_A)).thenReturn(List.of());
+
+            // 원본을 거치지 않는 소스로만 만들어진 장소가 여기로 옴
+            assertThat(placeQueryService.getDocuments(PLACE_A).documents()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("없는 장소면 물어보지 않고 PLACE_NOT_FOUND 다")
+        void 없는_장소() {
+            when(placeRepository.existsById(MISSING)).thenReturn(false);
+
+            assertThatThrownBy(() -> placeQueryService.getDocuments(MISSING))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(PlaceErrorCode.PLACE_NOT_FOUND);
+
+            // 없는 장소에 물으면 상대가 빈 목록을 주는데
+            // 그러면 "장소가 없어서 없는 것" 이 "못 가져온 것" 과 섞임
+            verify(placeDocumentProvider, never()).findByPlaceId(any());
+        }
+
+        @Test
+        @DisplayName("가져오지 못하면 빈 목록으로 바꾸지 않는다")
+        void 실패는_그대로() {
+            when(placeRepository.existsById(PLACE_A)).thenReturn(true);
+            when(placeDocumentProvider.findByPlaceId(PLACE_A))
+                    .thenThrow(new CustomException(PlaceErrorCode.PLACE_DOCUMENTS_UNAVAILABLE));
+
+            // 원문이 정말 없는 것과 지금 못 가져오는 것은 다른 상태임
+            assertThatThrownBy(() -> placeQueryService.getDocuments(PLACE_A))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(PlaceErrorCode.PLACE_DOCUMENTS_UNAVAILABLE);
+        }
+
+        private RawDocumentView view(String source) {
+            return new RawDocumentView(
+                    source, "문암생태공원", "[동반 유형] 일부구역 동반가능",
+                    LocalDateTime.of(2025, 9, 16, 15, 31, 47),
+                    LocalDateTime.of(2026, 9, 9, 14, 22, 57));
+        }
+    }
+
     private static Place place(UUID id, String name) {
         Place place = Place.create(name, PlaceType.PARK,
                 new BigDecimal("37.5000000"), new BigDecimal("127.0000000"));

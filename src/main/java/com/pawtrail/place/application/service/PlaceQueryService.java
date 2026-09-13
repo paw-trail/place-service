@@ -2,12 +2,16 @@ package com.pawtrail.place.application.service;
 
 import com.pawtrail.common.exception.CustomException;
 import com.pawtrail.place.application.dto.output.PlaceDetailOutput;
+import com.pawtrail.place.application.dto.output.PlaceDocumentOutput;
+import com.pawtrail.place.application.dto.output.PlaceDocumentsOutput;
 import com.pawtrail.place.application.dto.output.PlaceSummaryOutput;
 import com.pawtrail.place.domain.enums.FacilityCode;
 import com.pawtrail.place.domain.exception.PlaceErrorCode;
 import com.pawtrail.place.domain.model.Place;
 import com.pawtrail.place.domain.model.PlaceFacility;
 import com.pawtrail.place.domain.model.PlaceSourceLink;
+import com.pawtrail.place.domain.provider.PlaceDocumentProvider;
+import com.pawtrail.place.domain.provider.dto.RawDocumentView;
 import com.pawtrail.place.domain.repository.PlaceFacilityRepository;
 import com.pawtrail.place.domain.repository.PlaceRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceLinkRepository;
@@ -50,6 +54,7 @@ public class PlaceQueryService {
     private static final int MISSING_LOG_LIMIT = 5;
 
     private final PlaceRepository placeRepository;
+    private final PlaceDocumentProvider placeDocumentProvider;
     private final PlaceSourceLinkRepository placeSourceLinkRepository;
     private final PlaceFacilityRepository placeFacilityRepository;
 
@@ -174,5 +179,43 @@ public class PlaceQueryService {
                 .map(PlaceFacility::getFacilityCode)
                 .sorted()
                 .toList();
+    }
+
+    /**
+     * 그 장소가 어느 원본에서 왔는지를 돌려줍니다.
+     *
+     * 장소가 있는지 먼저 봅니다.
+     * 없는 장소로 원본을 물으면 상대가 빈 목록을 주는데,
+     * 그러면 "장소가 없어서 없는 것" 이 "지금 못 가져온 것" 과 섞입니다.
+     * 같은 화면의 상세가 없는 식별자에 404 를 내므로 결도 맞춥니다.
+     *
+     * 모르는 소스는 걸러 냅니다.
+     * 양쪽이 지금은 같은 값을 쓰지만 한쪽에만 소스가 늘 수 있고,
+     * 그때 화면을 통째로 죽이면 볼 수 있는 원문까지 못 보게 됩니다.
+     *
+     * 가져오지 못하면 예외가 그대로 올라갑니다.
+     * 빈 목록으로 바꾸면 원문이 정말 없는 것과 구분이 사라집니다.
+     */
+    public PlaceDocumentsOutput getDocuments(UUID placeId) {
+        if (!placeRepository.existsById(placeId)) {
+            throw new CustomException(PlaceErrorCode.PLACE_NOT_FOUND);
+        }
+
+        List<RawDocumentView> views = placeDocumentProvider.findByPlaceId(placeId);
+
+        List<PlaceDocumentOutput> documents = views.stream()
+                .map(PlaceDocumentOutput::from)
+                .filter(Objects::nonNull)
+                .toList();
+
+        if (documents.size() < views.size()) {
+            // 우리가 모르는 소스가 섞여 있음
+            //
+            // 화면은 나머지로 뜨나 우리가 알아채야 하는 상태임
+            log.warn("모르는 소스를 걸러 냈습니다. placeId={} 받은 것={} 내보낸 것={}",
+                    placeId, views.size(), documents.size());
+        }
+
+        return new PlaceDocumentsOutput(documents);
     }
 }
