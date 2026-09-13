@@ -188,19 +188,54 @@ class PlaceMatcherTest {
         }
 
         @Test
-        @DisplayName("변환 좌표가 끼면 병합하지 않는다")
-        void 변환_좌표는_보류() {
-            // EPSG:5174 에서 4326 으로 옮길 때 변환식이 하나가 아니라
-            // 어느 파라미터를 쓰느냐로 결과가 수 미터에서 수십 미터까지 달라짐
-            // 그 오차를 재보기 전에는 임계값을 정할 수 없고
-            // 원본과 같은 100m 로 뭉뚱그리면 명세가 경고한 그대로가 됨
+        @DisplayName("원본과 변환 좌표는 COORD_ORIGINAL 이다")
+        void 원본과_변환은_ORIGINAL() {
+            // 행정안전부 5,258 건을 옮겨 재보니 맞은 1,783 쌍의 중앙값이 3m,
+            // 90 분위가 20m 로 원본끼리도 나는 차이였음
+            // 지오코딩 취급을 할 이유가 없어 원본과 같은 100m 를 씀
             Place original = place("어떤장소", "어떤장소", CoordSource.ORIGINAL);
             Place converted = place("어떤장소", "어떤장소", CoordSource.CONVERTED);
-            Place converted2 = place("어떤장소", "어떤장소", CoordSource.CONVERTED);
 
-            assertThat(PlaceMatcher.matchByCoordinate(original, List.of(converted)).matched()).isFalse();
-            assertThat(PlaceMatcher.matchByCoordinate(converted, List.of(original)).matched()).isFalse();
-            assertThat(PlaceMatcher.matchByCoordinate(converted, List.of(converted2)).matched()).isFalse();
+            assertThat(PlaceMatcher.matchByCoordinate(original, List.of(converted)).method())
+                    .isEqualTo(MatchMethod.COORD_ORIGINAL);
+            assertThat(PlaceMatcher.matchByCoordinate(converted, List.of(original)).method())
+                    .isEqualTo(MatchMethod.COORD_ORIGINAL);
+        }
+
+        @Test
+        @DisplayName("변환 좌표끼리도 COORD_ORIGINAL 이다")
+        void 변환끼리도_ORIGINAL() {
+            // 지오코딩끼리를 막는 근거는 둘 다 주소에서 만든 값이라 오차가 겹친다는 것임
+            // 변환 좌표는 소스가 준 측량값을 좌표계만 옮긴 것이라 그 근거가 성립하지 않음
+            Place a = place("어떤장소", "어떤장소", CoordSource.CONVERTED);
+            Place b = place("어떤장소", "어떤장소", CoordSource.CONVERTED);
+
+            assertThat(PlaceMatcher.matchByCoordinate(a, List.of(b)).method())
+                    .isEqualTo(MatchMethod.COORD_ORIGINAL);
+        }
+
+        @Test
+        @DisplayName("원본과 변환 좌표도 100m 를 넘으면 병합하지 않는다")
+        void 원본과_변환은_100m_넘으면_보류() {
+            // 100m 를 넘긴 61 건은 변환 오차가 아니라
+            // 도로명주소 하나가 넓은 부지를 가리키는 곳이었음
+            // 임계값을 늘려도 그런 곳은 여전히 밖이고 거짓 병합 위험만 커짐
+            Place incoming = place("어떤장소", "어떤장소", CoordSource.ORIGINAL, LAT_BASE, LON_BASE);
+            Place far = place("어떤장소", "어떤장소", CoordSource.CONVERTED, LAT_150M, LON_BASE);
+
+            assertThat(PlaceMatcher.matchByCoordinate(incoming, List.of(far)).matched()).isFalse();
+        }
+
+        @Test
+        @DisplayName("변환 좌표가 낀 쌍도 원본과 같은 신뢰도를 받는다")
+        void 변환도_같은_신뢰도() {
+            // 실측이 원본만큼 정확하다고 말하는데 값만 낮추면
+            // 낮은 것부터 뽑아 보는 쓰임에서 헛되이 위로 올라옴
+            Place incoming = place("어떤장소", "어떤장소", CoordSource.ORIGINAL, LAT_BASE, LON_BASE);
+            Place near = place("어떤장소", "어떤장소", CoordSource.CONVERTED, "37.5002000", LON_BASE);
+
+            assertThat(PlaceMatcher.matchByCoordinate(incoming, List.of(near)).confidence())
+                    .isEqualByComparingTo(new BigDecimal("0.90"));
         }
 
         @Test
