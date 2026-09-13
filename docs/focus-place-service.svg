@@ -4,7 +4,7 @@
 <rect x="640.0" y="395.0" width="360" height="110" rx="12" fill="#DCFCE7" stroke="#22C55E" stroke-width="3.5"/>
 <text x="820" y="428" font-size="22" font-weight="bold" text-anchor="middle" fill="#111827">place-service  :8084</text>
 <text x="820" y="448" font-size="12" font-weight="normal" text-anchor="middle" fill="#4B5563">여러 소스가 가리키는 같은 곳을 하나로</text>
-<text x="820" y="464" font-size="12" font-weight="normal" text-anchor="middle" fill="#4B5563">API 16개 · 서비스 7개</text>
+<text x="820" y="464" font-size="12" font-weight="normal" text-anchor="middle" fill="#4B5563">API 11개 · 서비스 8개</text>
 <text x="632.0" y="381.0" font-size="13" font-weight="bold" text-anchor="start" fill="#22C55E">이 레포</text>
 <rect x="60.0" y="405.0" width="240" height="90" rx="12" fill="#DBEAFE" stroke="#3B82F6" stroke-width="2.2"/>
 <text x="180" y="428" font-size="17" font-weight="bold" text-anchor="middle" fill="#111827">gateway-server</text>
@@ -42,7 +42,7 @@
 <text x="1300" y="844" font-size="12" font-weight="normal" text-anchor="middle" fill="#4B5563">아직 없음</text>
 <polyline points="300.0,450 640.0,450" fill="none" stroke="#3B82F6" stroke-width="2.4" marker-end="url(#ah-3B82F6)"/>
 <rect x="428" y="420" width="103" height="19" rx="4" fill="#FFFFFF" opacity="0.92"/>
-<text x="480" y="432" font-size="13" font-weight="normal" text-anchor="middle" fill="#3B82F6">공개 8 · 관리자 6</text>
+<text x="480" y="432" font-size="13" font-weight="normal" text-anchor="middle" fill="#3B82F6">공개 2 · 관리자 7</text>
 <polyline points="820,160.0 820,395.0" fill="none" stroke="#6366F1" stroke-width="2.4" marker-end="url(#ah-6366F1)"/>
 <rect x="782" y="258" width="76" height="19" rx="4" fill="#FFFFFF" opacity="0.92"/>
 <text x="820.0" y="269.5" font-size="13" font-weight="normal" text-anchor="middle" fill="#6366F1">기동 시 설정</text>
