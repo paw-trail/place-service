@@ -53,12 +53,23 @@ public interface PlaceRepository {
     Optional<Place> findByIdForUpdate(UUID id);
 
     /**
-     * 여러 장소를 식별자로 한 번에 찾습니다. GET /internal/places?ids= 가 씁니다.
+     * 여러 장소를 식별자로 한 번에 찾습니다. GET /internal/places?ids= 와 색인용 조회가 씁니다.
      *
      * 없는 식별자는 결과에서 빠질 뿐 오류가 아닙니다.
      * 결과의 순서는 요청과 무관하므로 순서가 필요하면 부르는 쪽이 맞춥니다.
      */
     List<Place> findAllById(Collection<UUID> ids);
+
+    /**
+     * 장소를 id 순으로 이어서 찾습니다. 검색 서비스의 전량 재색인이 씁니다.
+     *
+     * after 가 null 이면 처음부터, 아니면 그보다 큰 id 부터 size 개입니다.
+     *
+     * 쪽 번호가 아니라 id 로 이어받습니다.
+     * UUID v7 이라 id 순서가 곧 만든 순서이고, 도중에 장소가 새로 생겨도
+     * 앞 쪽이 밀리지 않아 빠지거나 겹치는 장소가 없습니다.
+     */
+    List<Place> findPageAfter(UUID after, int size);
 
     /**
      * 병합 후보를 주소로 찾습니다. 판정 ADDRESS 단계가 씁니다.

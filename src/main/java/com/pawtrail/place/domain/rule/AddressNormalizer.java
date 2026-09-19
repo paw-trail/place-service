@@ -100,6 +100,68 @@ public final class AddressNormalizer {
         return resolved == null ? null : resolved.sido();
     }
 
+    /**
+     * 이 주소의 시군구 이름을 뽑습니다. place.sigungu_name 을 채울 때 씁니다.
+     *
+     * 시도를 떼어 낸 나머지의 첫 토큰이 시 · 군 · 구로 끝나면 그 이름입니다.
+     * 시 다음 토큰이 구로 끝나면 둘을 붙입니다. 일반구가 있는 시입니다.
+     *   경기도 고양시 덕양구 동세로 19     ->  고양시 덕양구
+     *   서울특별시 종로구 창경궁로 261     ->  종로구
+     *   세종특별자치시 한누리대로 2012     ->  null
+     *
+     * 세종은 시군구가 없는 단층 자치단체라 null 이 맞는 값입니다.
+     * 문화정보원도 세종 행의 시군구 명칭을 비워 둡니다.
+     *
+     * 개편 별칭(영종구 -> 중구)은 쓰지 않습니다.
+     * 그 표는 병합 매칭에서 같은 주소를 같게 보려는 것이고,
+     * 이 값은 사람이 고르는 지역 이름이라 주소에 적힌 대로 둡니다.
+     * 그래서 옛 이름과 새 이름이 함께 나올 수 있습니다.
+     *
+     * 규칙은 원본 파일과 대조했습니다.
+     * 문화정보원 CSV 에서 중복을 뺀 23,925 행 가운데 소스의 시군구 명칭과 23,780 행이 같았고 다른 행은 없었습니다.
+     * 뽑지 못한 145 행은 전부 세종이었습니다.
+     *
+     * 시도를 끝내 못 찾으면 null 입니다.
+     * 시도 없이 시군구만 담으면 다른 시도의 같은 이름(중구 · 동구)과 섞입니다.
+     */
+    public static String resolveSigunguName(String roadAddress, String jibunAddress,
+                                            String sidoFallback) {
+        String source = pick(roadAddress, jibunAddress);
+        if (source == null) {
+            return null;
+        }
+        String cleaned = PAREN.matcher(source).replaceAll(" ").trim();
+        cleaned = WHITESPACE.matcher(cleaned).replaceAll(" ").trim();
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+
+        Resolved resolved = resolveSido(cleaned, sidoFallback);
+        if (resolved == null || resolved.rest().isEmpty()) {
+            return null;
+        }
+
+        String[] tokens = resolved.rest().split(" ");
+        String first = tokens[0];
+        if (!isDistrict(first)) {
+            return null;
+        }
+        // 일반구가 있는 시는 구까지 붙여야 한 지역이 됩니다
+        // 고양시에는 덕양구 · 일산동구 · 일산서구가 있어 시만 담으면 세 구가 한 이름으로 뭉칩니다
+        if (first.endsWith("시") && tokens.length > 1 && isDistrict(tokens[1])
+                && tokens[1].endsWith("구")) {
+            return first + " " + tokens[1];
+        }
+        return first;
+    }
+
+    // 시 · 군 · 구로 끝나는 두 글자 이상의 토큰인지 봅니다
+    // 한 글자짜리는 행정 구역 이름이 될 수 없습니다
+    private static boolean isDistrict(String token) {
+        return token.length() >= 2
+                && (token.endsWith("시") || token.endsWith("군") || token.endsWith("구"));
+    }
+
     private static String pick(String roadAddress, String jibunAddress) {
         if (roadAddress != null && !roadAddress.isBlank()) {
             return roadAddress.trim();

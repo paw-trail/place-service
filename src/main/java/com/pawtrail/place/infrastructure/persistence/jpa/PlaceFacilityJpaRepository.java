@@ -2,6 +2,7 @@ package com.pawtrail.place.infrastructure.persistence.jpa;
 
 import com.pawtrail.place.domain.model.PlaceFacility;
 import com.pawtrail.place.domain.model.PlaceFacilityId;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -21,6 +22,8 @@ public interface PlaceFacilityJpaRepository
         extends JpaRepository<PlaceFacility, PlaceFacilityId> {
 
     List<PlaceFacility> findAllByPlaceId(UUID placeId);
+
+    List<PlaceFacility> findAllByPlaceIdIn(Collection<UUID> placeIds);
 
     /**
      * 그 장소의 편의시설을 한 번에 지웁니다.

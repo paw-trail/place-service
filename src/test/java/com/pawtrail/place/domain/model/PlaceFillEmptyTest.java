@@ -31,7 +31,7 @@ class PlaceFillEmptyTest {
     void 빈_칸을_채운다() {
         // 공사 계열이 대표이고 문화정보원이 지번을 주는 상황임
         Place primary = blank("여의도한강공원");
-        primary.applyAddress("서울특별시 영등포구 여의동로 330", null, "11", "560");
+        primary.applyAddress("서울특별시 영등포구 여의동로 330", null, "11", "영등포구");
 
         Place other = blank("여의도한강공원");
         other.applyAddress(null, "서울특별시 영등포구 여의도동 8", null, null);
@@ -145,7 +145,7 @@ class PlaceFillEmptyTest {
         primary.applyAddress("서울특별시 종로구 계동길 37", null, null, null);
 
         Place other = blank("어떤장소");
-        other.applyAddress("부산광역시 해운대구 해운대로 100", null, "26", "350");
+        other.applyAddress("부산광역시 해운대구 해운대로 100", null, "26", "해운대구");
         other.applyNormalized("어떤장소", List.of(), "부산|해운대구해운대로100");
 
         primary.fillEmptyFrom(other);
@@ -161,7 +161,7 @@ class PlaceFillEmptyTest {
         Place primary = blank("어떤장소");
 
         Place other = blank("어떤장소");
-        other.applyAddress("부산광역시 해운대구 해운대로 100", "부산광역시 해운대구 우동 1", "26", "350");
+        other.applyAddress("부산광역시 해운대구 해운대로 100", "부산광역시 해운대구 우동 1", "26", "해운대구");
         other.applyNormalized("어떤장소", List.of(), "부산|해운대구해운대로100");
 
         primary.fillEmptyFrom(other);
@@ -169,7 +169,7 @@ class PlaceFillEmptyTest {
         assertThat(primary.getAddressRoad()).isEqualTo("부산광역시 해운대구 해운대로 100");
         assertThat(primary.getAddressNormalized()).isEqualTo("부산|해운대구해운대로100");
         assertThat(primary.getSidoCode()).isEqualTo("26");
-        assertThat(primary.getSigunguCode()).isEqualTo("350");
+        assertThat(primary.getSigunguName()).isEqualTo("해운대구");
     }
 
     @Test

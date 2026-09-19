@@ -142,7 +142,7 @@ class PlaceAdminServiceTest {
     }
 
     @Test
-    @DisplayName("주소를 고치면 정규화 주소와 시도 코드를 다시 만든다")
+    @DisplayName("주소를 고치면 정규화 주소 · 시도 코드 · 시군구 이름을 다시 만든다")
     void 주소의_파생값() {
         Place place = filled();
         givenPlace(place);
@@ -153,6 +153,7 @@ class PlaceAdminServiceTest {
         assertThat(place.getAddressRoad()).isEqualTo("부산광역시 해운대구 해운대해변로 264");
         assertThat(place.getAddressNormalized()).startsWith("부산|");
         assertThat(place.getSidoCode()).isEqualTo("26");
+        assertThat(place.getSigunguName()).isEqualTo("해운대구");
     }
 
     @Test
