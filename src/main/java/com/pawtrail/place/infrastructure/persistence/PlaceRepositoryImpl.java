@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -43,6 +45,15 @@ public class PlaceRepositoryImpl implements PlaceRepository {
     @Override
     public List<Place> findAllById(Collection<UUID> ids) {
         return placeJpaRepository.findAllById(ids);
+    }
+
+    @Override
+    public List<Place> findPageAfter(UUID after, int size) {
+        Pageable first = PageRequest.of(0, size);
+        if (after == null) {
+            return placeJpaRepository.findAllByOrderByIdAsc(first);
+        }
+        return placeJpaRepository.findByIdGreaterThanOrderByIdAsc(after, first);
     }
 
     @Override
