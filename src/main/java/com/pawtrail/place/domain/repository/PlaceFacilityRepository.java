@@ -1,6 +1,7 @@
 package com.pawtrail.place.domain.repository;
 
 import com.pawtrail.place.domain.model.PlaceFacility;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -16,6 +17,14 @@ public interface PlaceFacilityRepository {
     PlaceFacility save(PlaceFacility facility);
 
     List<PlaceFacility> findAllByPlaceId(UUID placeId);
+
+    /**
+     * 여러 장소의 편의시설을 한 번에 찾습니다. 색인용 조회가 씁니다.
+     *
+     * 장소마다 따로 물으면 왕복이 장소 수만큼 생깁니다.
+     * 순서는 정하지 않으므로 부르는 쪽이 장소별로 묶고 늘어놓습니다.
+     */
+    List<PlaceFacility> findAllByPlaceIdIn(Collection<UUID> placeIds);
 
     // 그 장소의 편의시설을 전부 지움
     //

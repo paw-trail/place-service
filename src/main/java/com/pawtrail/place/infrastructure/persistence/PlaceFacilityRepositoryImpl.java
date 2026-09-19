@@ -3,6 +3,7 @@ package com.pawtrail.place.infrastructure.persistence;
 import com.pawtrail.place.domain.model.PlaceFacility;
 import com.pawtrail.place.domain.repository.PlaceFacilityRepository;
 import com.pawtrail.place.infrastructure.persistence.jpa.PlaceFacilityJpaRepository;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,14 @@ public class PlaceFacilityRepositoryImpl implements PlaceFacilityRepository {
     @Override
     public List<PlaceFacility> findAllByPlaceId(UUID placeId) {
         return placeFacilityJpaRepository.findAllByPlaceId(placeId);
+    }
+
+    @Override
+    public List<PlaceFacility> findAllByPlaceIdIn(Collection<UUID> placeIds) {
+        if (placeIds == null || placeIds.isEmpty()) {
+            return List.of();
+        }
+        return placeFacilityJpaRepository.findAllByPlaceIdIn(placeIds);
     }
 
     @Override

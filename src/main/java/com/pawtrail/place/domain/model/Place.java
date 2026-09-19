@@ -106,10 +106,17 @@ public class Place extends BaseEntity {
     @Column(name = "sido_code", length = 2)
     private String sidoCode;
 
-    // 법정동 코드의 시군구 부분임, 공사 응답의 lDongSignguCd 를 그대로 담음
-    // 혼잡도 API 의 signguCd 와 같은 체계인지는 아직 확인하지 않았음
-    @Column(name = "sigungu_code", length = 5)
-    private String sigunguCode;
+    // 시군구 이름임, 주소에서 뽑음 (AddressNormalizer.resolveSigunguName)
+    //
+    // 코드가 아니라 이름으로 담음
+    // 법정동 코드는 한국관광공사만 주고 나머지 소스는 이름이거나 다른 체계라 코드로는 채울 수 없었음
+    // 주소에는 네 소스 모두 시군구가 들어 있어 여기서 뽑으면 한 규칙으로 모두 채워짐
+    //
+    // 주소에 적힌 대로 담음, 일반구는 시와 붙임 (고양시 덕양구)
+    // 세종은 시군구가 없어 비어 있음
+    // 검색 서비스가 지역 필터와 지역 목록에 씀
+    @Column(name = "sigungu_name", length = 20)
+    private String sigunguName;
 
     // 공사 응답에서 mapY 가 위도이고 mapX 가 경도임, 순서가 반대임
     @Column(name = "lat", nullable = false, precision = 10, scale = 7)
@@ -255,14 +262,14 @@ public class Place extends BaseEntity {
     }
 
     /**
-     * 주소와 행정 코드를 채웁니다.
+     * 주소와 그 주소에서 나온 지역 값(시도 코드 · 시군구 이름)을 채웁니다.
      */
     public void applyAddress(String addressRoad, String addressJibun,
-                             String sidoCode, String sigunguCode) {
+                             String sidoCode, String sigunguName) {
         this.addressRoad = addressRoad;
         this.addressJibun = addressJibun;
         this.sidoCode = sidoCode;
-        this.sigunguCode = sigunguCode;
+        this.sigunguName = sigunguName;
     }
 
     /**
@@ -356,7 +363,7 @@ public class Place extends BaseEntity {
         }
         // 주소는 한 덩어리로 옮깁니다
         //
-        // 정규화 값과 행정 코드가 원본 주소에서 나온 것이라 따로 채우면 안 됩니다
+        // 정규화 값과 지역 값(시도 코드 · 시군구 이름)이 원본 주소에서 나온 것이라 따로 채우면 안 됩니다
         // 이쪽에 주소가 있고 정규화 값만 비어 있을 때 저쪽 정규화 값을 가져오면
         // 원본 주소와 정규화 값이 서로 다른 소스를 가리키게 됩니다
         // 그 값이 다음 병합의 후보 조회 키라 틀린 키로 매칭하게 됩니다
@@ -369,10 +376,10 @@ public class Place extends BaseEntity {
             this.addressJibun = other.addressJibun;
             this.addressNormalized = other.addressNormalized;
             this.sidoCode = other.sidoCode;
-            this.sigunguCode = other.sigunguCode;
+            this.sigunguName = other.sigunguName;
         } else {
             // 이쪽에 주소가 있으면 비어 있는 쪽만 보탭니다
-            // 정규화 값과 행정 코드는 건드리지 않습니다, 이쪽 주소에서 나온 값이어야 합니다
+            // 정규화 값과 지역 값은 건드리지 않습니다, 이쪽 주소에서 나온 값이어야 합니다
             if (isBlank(addressRoad)) {
                 this.addressRoad = other.addressRoad;
             }
@@ -557,7 +564,7 @@ public class Place extends BaseEntity {
     }
 
     /**
-     * 관리자가 주소를 고칩니다. 정규화 값과 시도 코드를 함께 다시 만듭니다.
+     * 관리자가 주소를 고칩니다. 정규화 값 · 시도 코드 · 시군구 이름을 함께 다시 만듭니다.
      *
      * 도로명과 지번 중 하나만 있어도 됩니다. 둘 다 비면 거부합니다.
      *
@@ -576,9 +583,9 @@ public class Place extends BaseEntity {
      * 기준이 갈리는 이유는 적재가 사람 없이 도는 배치이기 때문입니다.
      * 여기는 관리자가 화면 앞에 있어 그 자리에서 되돌려 줄 수 있습니다.
      *
-     * 시군구 코드는 손대지 않습니다.
-     * 주소에서 시군구를 뽑는 함수가 없고 이 서비스에 그 값을 읽는 코드도 없습니다.
-     * 채울 경로 자체가 아직 없어 전 행이 비어 있습니다.
+     * 시군구 이름도 같은 주소에서 다시 뽑습니다.
+     * 적재와 같은 규칙(AddressNormalizer.resolveSigunguName)이라 두 경로가 다른 이름을 만들지 않습니다.
+     * 세종처럼 시군구가 없는 주소면 비웁니다.
      */
     public void changeAddressByAdmin(String addressRoad, String addressJibun) {
         boolean roadEmpty = addressRoad == null || addressRoad.isBlank();
@@ -598,6 +605,7 @@ public class Place extends BaseEntity {
 
         Sido sido = AddressNormalizer.resolveSidoOnly(addressRoad, addressJibun, null);
         this.sidoCode = sido == null ? null : sido.code();
+        this.sigunguName = AddressNormalizer.resolveSigunguName(addressRoad, addressJibun, null);
     }
 
     /**

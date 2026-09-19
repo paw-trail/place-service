@@ -256,7 +256,9 @@ public class PlaceIngestService {
         Sido sido = AddressNormalizer.resolveSidoOnly(
                 draft.addressRoad(), draft.addressJibun(), draft.sidoName());
         place.applyAddress(draft.addressRoad(), draft.addressJibun(),
-                sido == null ? null : sido.code(), null);
+                sido == null ? null : sido.code(),
+                AddressNormalizer.resolveSigunguName(
+                        draft.addressRoad(), draft.addressJibun(), draft.sidoName()));
 
         place.applyCoordinate(coordinate[0], coordinate[1],
                 resolveCoordSource(draft, matchedTarget));
@@ -356,6 +358,9 @@ public class PlaceIngestService {
         sourceLinkRepository.save(
                 PlaceSourceLink.createPrimary(saved.getId(), draft.source(), draft.sourceId()));
         replaceFacilities(saved.getId(), draft);
+        // 새로 만든 장소도 알립니다
+        // 검색 서비스가 받아 색인에 넣습니다. 알리지 않으면 초기 색인 뒤에 생긴 장소가 검색에 나오지 않습니다
+        publishUpdated(saved.getId());
         return Outcome.ofCreated(saved.getId());
     }
 
@@ -629,9 +634,10 @@ public class PlaceIngestService {
     /**
      * 장소가 바뀌었음을 알립니다. search 가 받아 색인을 다시 만듭니다.
      *
-     * 새로 만들 때는 부르지 않습니다.
-     * 명세가 "변경 시" 로 규정했고 초기 적재가 만 칠천 건이라
-     * 신규까지 발행하면 아직 소비자가 없는 토픽에 그만큼이 쌓입니다.
+     * 새로 만들 때도 부릅니다.
+     * 예전에는 받는 쪽이 없어 신규를 빼 두었는데, 검색 서비스가 받는 쪽이 되면서
+     * 빼 두면 초기 색인 뒤에 수집으로 생긴 장소가 재색인 전까지 검색에 나오지 않게 됩니다.
+     * 빈 데이터베이스에 전량을 적재하면 새 장소 수만큼 발행됩니다.
      *
      * 잠긴 장소도 부르지 않습니다. 본체를 안 고쳤으므로 바뀐 것이 없습니다.
      *

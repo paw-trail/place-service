@@ -4,6 +4,7 @@ import com.pawtrail.common.exception.CustomException;
 import com.pawtrail.place.application.dto.output.PlaceDetailOutput;
 import com.pawtrail.place.application.dto.output.PlaceDocumentOutput;
 import com.pawtrail.place.application.dto.output.PlaceDocumentsOutput;
+import com.pawtrail.place.application.dto.output.PlaceIndexingOutput;
 import com.pawtrail.place.application.dto.output.PlaceSummaryOutput;
 import com.pawtrail.place.domain.enums.FacilityCode;
 import com.pawtrail.place.domain.exception.PlaceErrorCode;
@@ -37,7 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 쓰기를 하지 않습니다.
  * 메인 「인기 급상승」 조회수도 여기서 올리지 않습니다.
  * 최근 본 장소를 place 가 기록하지 않고 프론트가 따로 부르게 한 것과 같은 이유로
- * 조회 핫패스에 쓰기를 끼워 넣지 않으며, 누가 올릴지는 search 를 만들 때 정합니다.
+ * 조회 핫패스에 쓰기를 끼워 넣지 않으며, 조회수는 화면이 상세를 열 때 search 에 따로 알립니다.
  *
  * 캐시를 두지 않습니다.
  * 두 조회 모두 기본 키로 찾으므로 싸고, 가장 자주 불리는 검색은 색인 복제로 여기를 거치지 않습니다.
@@ -52,6 +53,14 @@ public class PlaceQueryService {
     // 없는 식별자를 로그에 몇 개까지 적을지임
     // 전부 적으면 없는 id 가 가득한 목록 하나에 로그 한 줄이 끝없이 길어짐
     private static final int MISSING_LOG_LIMIT = 5;
+
+    /**
+     * 색인용 이어받기가 한 번에 돌려주는 최대 수입니다.
+     *
+     * 주소에 식별자를 싣지 않아 8KB 천장과 무관합니다.
+     * 다른 배치 조회(policy · verdict)의 상한과 같게 둡니다.
+     */
+    public static final int MAX_INDEXING_SIZE = 500;
 
     private final PlaceRepository placeRepository;
     private final PlaceDocumentProvider placeDocumentProvider;
@@ -107,6 +116,76 @@ public class PlaceQueryService {
         }
 
         return result;
+    }
+
+    /**
+     * 색인용 장소를 식별자로 돌려줍니다. search 가 place.updated 를 받은 뒤 다시 읽을 때 씁니다.
+     *
+     * 규칙은 getSummaries 와 같습니다.
+     * 없는 식별자는 빠지고, 중복과 null 은 걸러 내며, 요청한 순서를 따릅니다.
+     * 폐업한 장소도 담습니다. 검색이 상태로 거릅니다.
+     */
+    @Transactional(readOnly = true)
+    public List<PlaceIndexingOutput> getIndexingByIds(Collection<UUID> placeIds) {
+        List<UUID> ids = placeIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, Place> found = placeRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(Place::getId, Function.identity()));
+
+        List<Place> ordered = ids.stream()
+                .map(found::get)
+                .filter(Objects::nonNull)
+                .toList();
+
+        if (ordered.size() < ids.size()) {
+            log.warn("색인용으로 요청한 장소 중 없는 것이 있습니다: 요청 {}건 · 찾음 {}건",
+                    ids.size(), ordered.size());
+        }
+
+        return toIndexing(ordered);
+    }
+
+    /**
+     * 색인용 장소를 id 순으로 이어서 돌려줍니다. search 의 전량 재색인이 씁니다.
+     *
+     * after 가 없으면 처음부터이고, 있으면 그 다음 장소부터입니다.
+     * 부르는 쪽은 받은 마지막 placeId 를 다음 after 로 넘기고,
+     * 받은 수가 size 보다 적으면 멈춥니다.
+     *
+     * size 는 1 에서 500 사이로 맞춥니다.
+     * 서비스끼리 쓰는 경로라, 개수를 잘못 적었다고 부르는 쪽의 일을 멈추지 않습니다.
+     * ingest 의 원문 목록 조회와 같은 처리입니다.
+     */
+    @Transactional(readOnly = true)
+    public List<PlaceIndexingOutput> getIndexingAfter(UUID after, int size) {
+        int limit = Math.max(1, Math.min(size, MAX_INDEXING_SIZE));
+        return toIndexing(placeRepository.findPageAfter(after, limit));
+    }
+
+    // 장소들의 편의시설을 한 번에 읽어 색인 모양으로 맞춤
+    // 편의시설은 상세와 같은 기준(FacilityCode 선언 순서)으로 늘어놓음
+    private List<PlaceIndexingOutput> toIndexing(List<Place> places) {
+        if (places.isEmpty()) {
+            return List.of();
+        }
+
+        List<UUID> ids = places.stream().map(Place::getId).toList();
+        Map<UUID, List<FacilityCode>> facilities = placeFacilityRepository.findAllByPlaceIdIn(ids).stream()
+                .collect(Collectors.groupingBy(
+                        PlaceFacility::getPlaceId,
+                        Collectors.mapping(PlaceFacility::getFacilityCode, Collectors.toList())));
+
+        return places.stream()
+                .map(place -> PlaceIndexingOutput.from(place,
+                        facilities.getOrDefault(place.getId(), List.of()).stream().sorted().toList()))
+                .toList();
     }
 
     /**

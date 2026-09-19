@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -32,6 +33,13 @@ public interface PlaceJpaRepository extends JpaRepository<Place, UUID> {
     Optional<Place> findByIdForUpdate(@Param("id") UUID id);
 
     List<Place> findByAddressNormalized(String addressNormalized);
+
+    // 색인용 이어받기의 첫 쪽입니다
+    // 개수는 Pageable 로 자르며 건수 조회가 따라붙지 않도록 List 로 받습니다
+    List<Place> findAllByOrderByIdAsc(Pageable pageable);
+
+    // 색인용 이어받기의 다음 쪽입니다, 기본 키 인덱스를 그대로 탑니다
+    List<Place> findByIdGreaterThanOrderByIdAsc(UUID after, Pageable pageable);
 
     /**
      * 좌표가 가까운 장소를 찾습니다.

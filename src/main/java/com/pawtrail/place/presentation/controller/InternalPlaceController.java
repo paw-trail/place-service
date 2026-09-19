@@ -1,7 +1,10 @@
 package com.pawtrail.place.presentation.controller;
 
+import com.pawtrail.common.exception.CommonErrorCode;
+import com.pawtrail.common.exception.CustomException;
 import com.pawtrail.common.response.CommonApiResponse;
 import com.pawtrail.place.application.dto.output.BulkResult;
+import com.pawtrail.place.application.dto.output.PlaceIndexingOutput;
 import com.pawtrail.place.application.dto.output.PlaceSummaryOutput;
 import com.pawtrail.place.application.service.PlaceBulkService;
 import com.pawtrail.place.application.service.PlaceQueryService;
@@ -40,7 +43,7 @@ public class InternalPlaceController {
      * 여러 장소를 한 번에 돌려줍니다.
      *
      * user 가 즐겨찾기 · 방문 기록 · 일정 · 최근 본 장소 · 하루 요약의 카드를 조립할 때 부르고,
-     * 명세상 search · notification · review 도 부릅니다.
+     * 명세상 notification · review 도 부릅니다. search 는 아래 색인용 조회를 씁니다.
      *
      * 없는 식별자는 결과에서 빠질 뿐 오류가 아닙니다. 이유는 PlaceQueryService 에 적어 두었습니다.
      *
@@ -64,6 +67,40 @@ public class InternalPlaceController {
             List<UUID> ids) {
 
         return ResponseEntity.ok(CommonApiResponse.success(placeQueryService.getSummaries(ids)));
+    }
+
+    /**
+     * 검색 서비스가 색인을 세울 때 부르는 조회입니다.
+     *
+     * 두 방식이 한 경로에 있습니다.
+     *   ids 가 있으면   그 장소들을 돌려줍니다. 100개까지이며 place.updated 를 받고 다시 읽을 때 씁니다
+     *   ids 가 없으면   id 순으로 after 다음 장소들을 size 개 돌려줍니다. 전량 재색인에 씁니다
+     *                  after 가 없으면 처음부터이고 size 는 1 에서 500 사이로 맞춥니다
+     * ids 와 after 를 함께 주면 400 VALIDATION_FAILED 입니다. 어느 방식인지 정할 수 없습니다.
+     *
+     * 응답은 목록 그대로입니다. 받은 수가 size 보다 적으면 끝입니다.
+     * 폐업한 장소도 담습니다.
+     *
+     * 위의 /internal/places?ids= 와 모양을 나눴습니다. 이유는 PlaceIndexingOutput 에 적었습니다.
+     * ids 의 상한 100 은 위 조회와 같은 이유(주소 길이 천장)입니다.
+     * 이어받기는 주소에 식별자를 싣지 않아 그 천장과 무관합니다.
+     */
+    @GetMapping("/indexing")
+    public ResponseEntity<CommonApiResponse<List<PlaceIndexingOutput>>> getIndexing(
+            @RequestParam(value = "ids", required = false)
+            @Size(max = 100, message = "한 번에 100개까지 조회할 수 있습니다.")
+            List<UUID> ids,
+            @RequestParam(value = "after", required = false) UUID after,
+            @RequestParam(value = "size", defaultValue = "" + PlaceQueryService.MAX_INDEXING_SIZE) int size) {
+
+        if (ids != null && after != null) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+
+        List<PlaceIndexingOutput> result = ids != null
+                ? placeQueryService.getIndexingByIds(ids)
+                : placeQueryService.getIndexingAfter(after, size);
+        return ResponseEntity.ok(CommonApiResponse.success(result));
     }
 
     /**

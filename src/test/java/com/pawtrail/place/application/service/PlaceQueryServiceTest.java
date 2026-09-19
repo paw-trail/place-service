@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.pawtrail.common.exception.CustomException;
 import com.pawtrail.place.application.dto.output.PlaceDetailOutput;
 import com.pawtrail.place.application.dto.output.PlaceDocumentOutput;
+import com.pawtrail.place.application.dto.output.PlaceIndexingOutput;
 import com.pawtrail.place.application.dto.output.PlaceSummaryOutput;
 import com.pawtrail.place.domain.enums.FacilityCode;
 import com.pawtrail.place.domain.enums.MatchMethod;
@@ -29,6 +31,7 @@ import com.pawtrail.place.domain.repository.PlaceRepository;
 import com.pawtrail.place.domain.repository.PlaceSourceLinkRepository;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -191,7 +194,7 @@ class PlaceQueryServiceTest {
     @DisplayName("도로명이 있으면 도로명을 주소로 쓴다")
     void 도로명이_먼저() {
         Place place = place(PLACE_A, "여의도한강공원");
-        place.applyAddress("서울특별시 영등포구 여의동로 330", "서울특별시 영등포구 여의도동 8", "11", "11560");
+        place.applyAddress("서울특별시 영등포구 여의동로 330", "서울특별시 영등포구 여의도동 8", "11", "영등포구");
         givenDetail(place, List.of(), List.of());
 
         assertThat(placeQueryService.getDetail(PLACE_A).address()).isEqualTo("서울특별시 영등포구 여의동로 330");
@@ -201,7 +204,7 @@ class PlaceQueryServiceTest {
     @DisplayName("도로명이 없으면 지번을 주소로 쓴다")
     void 도로명이_없으면_지번() {
         Place place = place(PLACE_A, "여의도한강공원");
-        place.applyAddress(null, "서울특별시 영등포구 여의도동 8", "11", "11560");
+        place.applyAddress(null, "서울특별시 영등포구 여의도동 8", "11", "영등포구");
         givenDetail(place, List.of(), List.of());
 
         assertThat(placeQueryService.getDetail(PLACE_A).address()).isEqualTo("서울특별시 영등포구 여의도동 8");
@@ -234,6 +237,113 @@ class PlaceQueryServiceTest {
         givenDetail(closed, List.of(), List.of());
 
         assertThat(placeQueryService.getDetail(PLACE_A).status()).isEqualTo(PlaceStatus.CLOSED);
+    }
+
+    // ── 색인용 ───────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("색인용 조회")
+    class 색인용_조회 {
+
+        @Test
+        @DisplayName("식별자로 읽으면 요청 순서대로 담고 없는 것 · 중복 · null 은 뺀다")
+        void 식별자로_읽기() {
+            // 저장소는 순서를 보장하지 않으므로 일부러 거꾸로 돌려줌
+            when(placeRepository.findAllById(anyCollection()))
+                    .thenReturn(List.of(place(PLACE_B, "B 공원"), place(PLACE_A, "A 카페")));
+            when(placeFacilityRepository.findAllByPlaceIdIn(anyCollection())).thenReturn(List.of());
+
+            List<PlaceIndexingOutput> result = placeQueryService.getIndexingByIds(
+                    Arrays.asList(PLACE_A, MISSING, null, PLACE_A, PLACE_B));
+
+            verify(placeRepository).findAllById(List.of(PLACE_A, MISSING, PLACE_B));
+            assertThat(result).extracting(PlaceIndexingOutput::placeId).containsExactly(PLACE_A, PLACE_B);
+        }
+
+        @Test
+        @DisplayName("물어볼 것이 없으면 저장소를 부르지 않는다")
+        void 빈_요청() {
+            assertThat(placeQueryService.getIndexingByIds(List.of())).isEmpty();
+
+            verifyNoInteractions(placeRepository, placeFacilityRepository);
+        }
+
+        @Test
+        @DisplayName("열여섯 칸을 채우고 편의시설은 한 번에 읽어 선언 순서로 담는다")
+        void 열여섯_칸() {
+            Place place = place(PLACE_A, "여의도한강공원");
+            place.applyNormalized("여의도한강공원", List.of("여의도공원"), "서울|영등포구여의동로330");
+            place.applyAddress("서울특별시 영등포구 여의동로 330", "서울특별시 영등포구 여의도동 8", "11", "영등포구");
+            place.applyContact(null, null, null, null, "https://example.com/a.jpg", null);
+            place.applyDescription("한강을 따라 걷는 공원입니다", null, null);
+            place.applyDataBaseDate(LocalDate.of(2025, 3, 24));
+            place.changeStatus(PlaceStatus.ACTIVE);
+            setField(place, "updatedAt", LocalDateTime.of(2026, 9, 19, 12, 0));
+            when(placeRepository.findAllById(anyCollection())).thenReturn(List.of(place));
+            when(placeFacilityRepository.findAllByPlaceIdIn(List.of(PLACE_A))).thenReturn(List.of(
+                    PlaceFacility.create(PLACE_A, FacilityCode.RESERVATION),
+                    PlaceFacility.create(PLACE_A, FacilityCode.PARKING)));
+
+            PlaceIndexingOutput out = placeQueryService.getIndexingByIds(List.of(PLACE_A)).get(0);
+
+            assertThat(out.placeId()).isEqualTo(PLACE_A);
+            assertThat(out.name()).isEqualTo("여의도한강공원");
+            assertThat(out.nameAlias()).containsExactly("여의도공원");
+            assertThat(out.placeType()).isEqualTo(PlaceType.PARK);
+            assertThat(out.addressRoad()).isEqualTo("서울특별시 영등포구 여의동로 330");
+            assertThat(out.addressJibun()).isEqualTo("서울특별시 영등포구 여의도동 8");
+            assertThat(out.sidoCode()).isEqualTo("11");
+            assertThat(out.sigunguName()).isEqualTo("영등포구");
+            assertThat(out.lat()).isEqualByComparingTo(new BigDecimal("37.5"));
+            assertThat(out.lon()).isEqualByComparingTo(new BigDecimal("127.0"));
+            assertThat(out.facilities()).containsExactly(FacilityCode.PARKING, FacilityCode.RESERVATION);
+            assertThat(out.status()).isEqualTo(PlaceStatus.ACTIVE);
+            assertThat(out.imageUrl()).isEqualTo("https://example.com/a.jpg");
+            assertThat(out.overview()).isEqualTo("한강을 따라 걷는 공원입니다");
+            assertThat(out.dataBaseDate()).isEqualTo(LocalDate.of(2025, 3, 24));
+            assertThat(out.updatedAt()).isEqualTo(LocalDateTime.of(2026, 9, 19, 12, 0));
+        }
+
+        @Test
+        @DisplayName("별칭과 편의시설이 없으면 null 이 아니라 빈 목록이다")
+        void 빈_목록() {
+            when(placeRepository.findAllById(anyCollection())).thenReturn(List.of(place(PLACE_A, "A 공원")));
+            when(placeFacilityRepository.findAllByPlaceIdIn(anyCollection())).thenReturn(List.of());
+
+            PlaceIndexingOutput out = placeQueryService.getIndexingByIds(List.of(PLACE_A)).get(0);
+
+            assertThat(out.nameAlias()).isNotNull().isEmpty();
+            assertThat(out.facilities()).isNotNull().isEmpty();
+        }
+
+        @Test
+        @DisplayName("이어 읽을 때는 after 를 그대로 넘기고 개수를 1 에서 500 사이로 맞춘다")
+        void 이어_읽기() {
+            when(placeRepository.findPageAfter(any(), anyInt())).thenReturn(List.of());
+
+            assertThat(placeQueryService.getIndexingAfter(PLACE_A, 9999)).isEmpty();
+            assertThat(placeQueryService.getIndexingAfter(null, 0)).isEmpty();
+
+            verify(placeRepository).findPageAfter(PLACE_A, 500);
+            verify(placeRepository).findPageAfter(null, 1);
+            // 빈 쪽이면 편의시설을 묻지 않음
+            verifyNoInteractions(placeFacilityRepository);
+        }
+
+        @Test
+        @DisplayName("이어 읽은 쪽의 편의시설도 한 번에 읽어 장소별로 나눈다")
+        void 이어_읽은_쪽의_편의시설() {
+            when(placeRepository.findPageAfter(null, 500))
+                    .thenReturn(List.of(place(PLACE_A, "A 공원"), place(PLACE_B, "B 캠핑장")));
+            when(placeFacilityRepository.findAllByPlaceIdIn(List.of(PLACE_A, PLACE_B)))
+                    .thenReturn(List.of(PlaceFacility.create(PLACE_B, FacilityCode.PLAYGROUND)));
+
+            List<PlaceIndexingOutput> page = placeQueryService.getIndexingAfter(null, 500);
+
+            assertThat(page).extracting(PlaceIndexingOutput::placeId).containsExactly(PLACE_A, PLACE_B);
+            assertThat(page.get(0).facilities()).isEmpty();
+            assertThat(page.get(1).facilities()).containsExactly(FacilityCode.PLAYGROUND);
+        }
     }
 
     // 상세 조회가 부르는 저장소 셋을 한 번에 채움
