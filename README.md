@@ -127,7 +127,7 @@ MOIS_VET      행정안전부 동물병원 인허가       5,451건
 
 **⑤ 이벤트를 보내기만 합니다**
 
-`place.updated` 를 발행하고 받는 것은 없습니다. `search` 가 그것으로 색인을 다시 세웁니다.
+`place.updated` 를 발행하고 받는 것은 없습니다. `search` 가 그것을 받고 색인용 조회로 다시 읽어 색인을 고칩니다.
 
 ---
 
@@ -143,6 +143,7 @@ MOIS_VET      행정안전부 동물병원 인허가       5,451건
 | 관리자 — 이벤트 재발행 | `GET /api/v1/admin/places/outbox` |
 
 ⛔**검색 화면은 이 서비스를 부르지 않습니다.** `search` 가 자기 색인으로 답합니다.
+그 색인은 `search` 가 `GET /internal/places/indexing` 으로 읽어 세웁니다.
 
 <br><br>
 
@@ -719,7 +720,8 @@ place
            └─ 막대로 이음
            ↓
 정규화    강원|양양군현북면하조대해안길35
-시도코드   42
+시도코드  51
+시군구    양양군
 ```
 
 **시도 표준화가 필요한 이유입니다.**
@@ -736,8 +738,24 @@ place
 둘 다 없으면      정규화 주소가 null → 주소로는 못 찾음
 ```
 
-> ⚠**`sigungu_code` 는 지금 전부 비어 있습니다.**
-> 뽑는 함수가 없고 소스도 주지 않습니다. 매칭은 이 값을 안 봅니다.
+**시군구는 이름으로 담습니다.** 주소에서 뽑습니다.
+
+| 규칙 | 예 |
+|---|---|
+| 시도를 떼어 낸 나머지의 첫 토큰이 시 · 군 · 구로 끝나면 그 이름 | `서울특별시 종로구 창경궁로 261` → `종로구` |
+| 시 다음 토큰이 구로 끝나면 둘을 붙임 (일반구) | `경기도 고양시 덕양구 동세로 19` → `고양시 덕양구` |
+| 세종은 시군구가 없음 | `세종특별자치시 한누리대로 2012` → 비어 있음 |
+| 개편 별칭은 안 씀 | `인천광역시 영종구 마시란로 118` → `영종구` (중구로 안 바꿈) |
+
+| 왜 이름인가 | |
+|---|---|
+| 코드 | 법정동 코드는 한국관광공사만 줍니다. 나머지 소스는 이름이거나 다른 체계라 코드로는 못 채웁니다 |
+| 주소 | 네 소스 모두 주소에 시군구가 들어 있어 한 규칙으로 전부 채워집니다 |
+
+> 실측: 문화정보원 파일 23,925행에서 소스가 적어 둔 시군구 명칭과 전부 같았습니다.
+> 로컬 데이터베이스 19,501곳 가운데 19,412곳이 채워졌고, 빈 89곳은 전부 세종입니다.
+
+> ⚠**매칭은 이 값을 안 봅니다.** `search` 가 지역 필터와 지역 목록에 씁니다.
 
 ---
 
@@ -876,7 +894,7 @@ posblFcltyCl 의 "어린이놀이시설" 297건
 <br><br>
 
 ---
-## 5. API 11개
+## 5. API 12개
 
 ### 5-1. 한눈에
 
@@ -898,7 +916,8 @@ posblFcltyCl 의 "어린이놀이시설" 297건
 | 8 | `GET /api/v1/admin/places/outbox` | 관리자 — 멈춘 이벤트 |
 | 9 | `POST /api/v1/admin/places/outbox/{id}/retry` | 관리자 — 다시 발행 |
 | 10 | `GET /internal/places?ids=` | `user` — 카드에 쓸 이름과 사진 |
-| 11 | `POST /internal/places/bulk` | `ingest` — 적재를 넘김 |
+| 11 | `GET /internal/places/indexing` | `search` — 색인을 세울 값 |
+| 12 | `POST /internal/places/bulk` | `ingest` — 적재를 넘김 |
 
 ⛔**검색 API 가 없습니다.** `search` 가 자기 색인으로 답합니다. 이 서비스는 식별자로만 찾습니다.
 
@@ -1183,12 +1202,12 @@ POST /api/v1/admin/places/outbox/{id}/retry   다시 발행
 `user` 가 즐겨찾기·방문·일정 카드를 만들 때 부릅니다.
 
 ```json
-응답   200
-{ "places": [
+응답   200   (공통 봉투의 data)
+[
     { "placeId": "01a09015-…", "name": "문암생태공원", "placeType": "PARK",
       "imageUrl": "https://…", "lat": 36.6553, "lon": 127.4602,
       "supplyPoint": false }
-] }
+]
 ```
 
 | | |
@@ -1201,7 +1220,59 @@ POST /api/v1/admin/places/outbox/{id}/retry   다시 발행
 
 ---
 
-### 5-9. `POST /internal/places/bulk` — 적재 받기
+### 5-9. `GET /internal/places/indexing` — 색인을 세울 값
+
+`search` 가 색인을 세우고 고칠 때 부릅니다. 한 경로에 두 방식이 있습니다.
+
+| 요청 | 돌려주는 것 | 언제 |
+|---|---|---|
+| `?ids=a&ids=b` | 그 장소들. 100개까지 | `place.updated` 를 받고 다시 읽을 때 |
+| `?after=X&size=500` | id 순으로 X 다음부터 `size` 개. 500개까지이며 `after` 가 없으면 처음부터 | 전량 재색인 |
+| 둘을 함께 | `400 VALIDATION_FAILED` | 어느 방식인지 정할 수 없음 |
+
+```json
+응답   200   (공통 봉투의 data)
+[
+    { "placeId": "01a09015-922a-7ba9-9d45-e83f4f14a878", "name": "눈꽃여행", "nameAlias": [],
+      "placeType": "STAY", "addressRoad": "전북특별자치도 무주군 설천면 내배방길 22",
+      "addressJibun": null, "sidoCode": "52", "sigunguName": "무주군",
+      "lat": 35.9124583, "lon": 127.7567357, "facilities": ["PARKING"], "status": "ACTIVE",
+      "imageUrl": "https://tong.visitkorea.or.kr/cms/resource/14/2575614_image2_1.jpg",
+      "overview": "한 여름의 무더위를 식혀주는 덕유산의 상쾌한 바람과 싱그러움. 전국의 크시와 부드 매니아들을 흥분시키는 무주리조트의 짜릿함과 함께 새하얀 눈꽃처럼 포근한 휴식과 편안함을 더하는 무주 눈꽃 여행이 방문객들을 기다린다.",
+      "dataBaseDate": null, "updatedAt": "2026-09-11T19:48:47.915252" }
+]
+```
+
+| | |
+|---|---|
+| 순서 | `ids` 는 요청한 순서, 이어받기는 id 순 |
+| 없는 식별자 | 빠질 뿐 오류가 아닙니다. `?ids=` 와 같습니다 |
+| 폐업한 장소 | 담습니다. `search` 가 `status` 로 거릅니다 |
+| 끝 | 받은 수가 `size` 보다 적으면 끝입니다 |
+| `size` | 1 에서 500 사이로 맞춥니다. 벗어나도 거절하지 않습니다 |
+| `updatedAt` | 재색인과 이벤트가 겹칠 때 받는 쪽이 더 새 값만 덮어쓰는 데 씁니다 |
+
+**왜 `?ids=` 를 넓히지 않고 따로 뒀나.**
+
+```
+?ids=       user 의 카드용 7칸.  가벼워야 함
+indexing    search 의 색인용 16칸.  소개문까지 실음
+→ 한 모양에 섞으면 카드 목록마다 소개문이 따라가고, 한쪽 때문에 칸을 바꿀 때 다른 쪽이 흔들림
+```
+
+**왜 쪽 번호가 아니라 id 로 이어받나.**
+
+```
+UUID v7 이라 id 순서가 곧 만든 순서
+→ 재색인 도중에 장소가 새로 생겨도 앞 쪽이 밀리지 않음
+→ 빠지거나 겹치는 장소가 없음
+```
+
+> 실측: 500개씩 40번에 19,501곳을 모두 받았고 겹친 장소가 없었습니다. 2.2초 걸렸습니다.
+
+---
+
+### 5-10. `POST /internal/places/bulk` — 적재 받기
 
 `ingest` 가 부릅니다. **이 서비스의 데이터가 채워지는 유일한 경로입니다.**
 
@@ -1252,7 +1323,7 @@ POST /api/v1/admin/places/outbox/{id}/retry   다시 발행
 
 ---
 
-### 5-10. 에러 코드
+### 5-11. 에러 코드
 
 | 코드 | HTTP | 언제 |
 |---|---|---|
@@ -1309,28 +1380,29 @@ id                  uuid PK           UUID v7.  만든 순서가 곧 정렬 순�
 name                varchar(200)      지점명을 포함해 폭이 넓음
 name_normalized     varchar(200)      공백만 지운 것.  합칠지 판단할 때 씀
 name_alias          text[]            괄호 안의 말 + 괄호를 뗀 본명
-place_type          varchar(20)       아홉 가지
+place_type          varchar(12)       아홉 가지
 address_road        varchar(300)
 address_jibun       varchar(300)      문화정보원만 줌
 address_normalized  varchar(300)      시도|나머지.  ⛔매칭 일 순위 키
-sido_code           char(2)           ⛔전부 비어 있지 않음.  아래 참고
-sigungu_code        char(5)           ⛔전부 비어 있음
+sido_code           varchar(2)        법정동 두 자리
+sigungu_name        varchar(20)       시군구 이름.  V26 에서 코드를 이름으로.  세종은 null
 lat  lon            numeric(10,7)     NOT NULL
-geom                geometry(Point)   PostGIS.  lat·lon 이 바뀌면 자동
-coord_source        varchar(20)       ORIGINAL · CONVERTED · GEOCODED
+geom                geography(Point)  PostGIS.  lat·lon 이 바뀌면 자동
+coord_source        varchar(10)       ORIGINAL · CONVERTED · GEOCODED
 tel                 varchar(30)
-tel_source          varchar(20)       어느 소스가 줬는지.  관리자가 고치면 MANUAL
+tel_source          varchar(16)       어느 소스가 줬는지.  관리자가 고치면 MANUAL
 homepage            text              앵커 태그가 통째로 오는 소스가 있어 text
 reservation_url     text
 image_url           text
 overview            text
 business_hours      varchar(600)      V22 에서 넓힘
 closed_days         varchar(200)      V22 에서 넓힘
-supply_point        boolean           급수대
-status              varchar(12)       ACTIVE · CLOSED · UNKNOWN
+supply_point        boolean           편의점 · 마트처럼 동선 중에 들르는 보급 지점
+status              varchar(10)       ACTIVE · CLOSED · UNKNOWN
 admin_locked        boolean           관리자가 고친 장소
-lcls1 ~ lcls3       varchar(100)      ⛔원본 보존.  V21 에서 넓힘
-cpyrht_div_cd       varchar(20)       ⛔원본 보존
+lcls1               varchar(100)      ⛔원본 보존.  V21 에서 넓힘
+lcls2  lcls3        varchar(30)       ⛔원본 보존
+cpyrht_div_cd       varchar(10)       ⛔원본 보존
 data_base_date      date              ⛔원본 보존
 + BaseEntity 6컬럼
 ```
@@ -1341,8 +1413,8 @@ data_base_date      date              ⛔원본 보존
 | `(name_normalized)` | 이름으로 좁히기 |
 | `GIST (geom)` | 반경 안의 후보 찾기 |
 
-> ⚠**`sigungu_code` 는 채울 경로가 없습니다.** 소스도 안 주고 뽑는 함수도 없습니다.
-> 매칭이 이 값을 안 보므로 지금은 문제가 아닙니다.
+> ⚠**`sigungu_name` 은 주소에서 뽑습니다.** 적재와 관리자 주소 수정이 채우고, 이미 있던 행은 `V27` 이 한 번 채웠습니다.
+> 뽑는 규칙은 [4-3](#4-3-주소--정규화-주소가-진짜-열쇠입니다) 에 있습니다.
 
 ---
 
@@ -1454,11 +1526,30 @@ INDEX  (source, source_id)              수집이 "이 레코드를 뗀 적 있�
 | | 무엇 |
 |---|---|
 | `V20` | 표 4개 + 인덱스 |
-| `V21` | `lcls1~3` 을 `varchar(100)` 으로 |
+| `V21` | `lcls1` 을 `varchar(100)` 으로 |
 | `V22` | `business_hours` 600 · `closed_days` 200 |
 | `V23` | `place_source_detach` 신설 |
 | `V24` | 대기 인덱스를 `(place_id, field_name, status)` 로 |
 | `V25` | 대기 중복 방지 부분 유니크 |
+| `V26` | `sigungu_code` 를 `sigungu_name varchar(20)` 으로 |
+| `V27` | ⛔자바 — 이미 있던 행의 시군구 이름을 한 번 채움 |
+
+**`V27` 만 자바입니다.**
+
+```
+어디에     infrastructure/persistence/migration/V27__FillSigunguName.java
+           ⛔SQL 폴더가 아님
+왜 자바    시군구를 뽑는 규칙이 AddressNormalizer 에 있음
+           SQL 로 다시 쓰면 같은 규칙이 두 곳에 생김
+어떻게     빈으로 등록하면 스프링 부트가 Flyway 에 넣음
+           클래스 이름이 곧 판과 설명이라 V27__ 로 시작해야 함
+언제       어느 환경이든 기동할 때 한 번.  사람이 누를 것이 없음
+```
+
+> 실측: 19,501행 가운데 19,412행을 채웠고 빈 89행은 전부 세종입니다. 4.5초 걸렸습니다.
+
+> ⛔**`V26` 이 돈 데이터베이스에서는 옛 이미지(v0.1.2)가 뜨지 않습니다.**
+> 칸 이름이 달라 기동 검증에서 멈춥니다. 되돌리려면 `V26` 전에 뜬 덤프로 되돌려야 합니다.
 
 **`V21`·`V22` 가 왜 생겼나.**
 
@@ -1495,11 +1586,11 @@ domain 은 아래를 모릅니다
 presentation/
   controller/        PlaceController          공개 2
                      AdminPlaceController     관리자 7
-                     InternalPlaceController  내부 2
+                     InternalPlaceController  내부 3
   request/           PlaceBulkRequest · PlaceAdminUpdateRequest
 
 application/
-  service/           PlaceQueryService        조회 셋
+  service/           PlaceQueryService        조회 · 색인용 조회
                      PlaceBulkService         적재 입구
                      PlaceIngestService       ⛔합치는 본체
                      PlaceAdminService        수정 · 소스 분리
@@ -1523,6 +1614,7 @@ domain/
 
 infrastructure/
   persistence/       구현 5개 + jpa/ 인터페이스 5개
+                     migration/  V27__FillSigunguName   ⛔자바 마이그레이션
   provider/external/ KakaoGeocodingProvider
   provider/internal/ PlaceDocumentProviderImpl
   config/            PlaceConfig · KakaoProperties
@@ -1574,12 +1666,13 @@ PlaceMatcher · PlaceMerger · AddressNormalizer …
 
 ---
 
-### 7-5. 시험 165개
+### 7-5. 시험 186개
 
 | 무엇을 | |
 |---|---|
-| 규칙 클래스 | 정규화 · 매칭 · 병합 · 분류 · 편의시설 |
-| 조회 서비스 | 없는 식별자 · 원문 보기 · 표시 이름 |
+| 규칙 클래스 | 정규화 · 시군구 이름 · 매칭 · 병합 · 분류 · 편의시설 |
+| 조회 서비스 | 없는 식별자 · 원문 보기 · 표시 이름 · 색인용 조회 |
+| 내부 컨트롤러 | 색인용 조회의 두 방식 · 함께 주면 거절 |
 | 관리자 서비스 | 부분 수정 · 소스 분리 · 승인 · 반려 |
 | 적재 | 멱등 · 건너뜀 · 대기 행 |
 | 스키마 | ⛔**PostgreSQL 컨테이너를 띄워** 엔티티와 대조 |
@@ -1741,7 +1834,7 @@ ingest 쪽 Jenkins 잡이 부름  (아직 없음, 지금은 사람이 손으로)
 ### 9-4. `place.updated` 는 언제 나가나
 
 ```
-새 장소를 만들었을 때      ⛔안 나감.  아직 아무도 모르는 장소라 알릴 것이 없음
+새 장소를 만들었을 때      나감.  search 가 색인에 넣음
 값이 바뀌었을 때          나감
 관리자가 고쳤을 때         나감
 소스를 떼어냈을 때         나감
@@ -1755,7 +1848,7 @@ ingest 쪽 Jenkins 잡이 부름  (아직 없음, 지금은 사람이 손으로)
 
 | 왜 | |
 |---|---|
-| 받는 쪽이 다시 읽음 | `search` 가 `GET /internal/places?ids=` 로 최신을 가져갑니다 |
+| 받는 쪽이 다시 읽음 | `search` 가 `GET /internal/places/indexing?ids=` 로 최신을 가져갑니다 |
 | 순서가 어긋나도 | 늦게 도착한 이벤트가 옛 값을 되살리지 않습니다 |
 
 **Outbox 로 나갑니다.**
@@ -1981,7 +2074,7 @@ lat · lon 이 NOT NULL
 | | |
 |---|---|
 | 검색은 | `search` 가 자기 색인으로 답합니다 |
-| 이 서비스는 | `place.updated` 를 보내고 그쪽이 다시 읽어 갑니다 |
+| 이 서비스는 | `place.updated` 를 보내고 그쪽이 색인용 조회로 다시 읽어 갑니다 |
 | 왜 | 검색 조건이 장소 자료만으로 안 됩니다. 판정 결과와 후기 평점이 섞입니다 |
 
 ---
@@ -2006,7 +2099,7 @@ lat · lon 이 NOT NULL
 | | 왜 안 했나 |
 |---|---|
 | 이름 유사도로 합치기 | 임계값을 정할 근거가 없습니다. 실측으로 완전 일치만으로 147쌍이 잡혔습니다 |
-| 시군구 코드로 좁히기 | 그 값을 채울 경로가 없습니다 |
+| 시군구로 후보 좁히기 | 후보를 이미 정규화 주소(시군구가 들어 있음)와 반경으로 찾아 더 좁힐 것이 없습니다 |
 | 「외 N필지」 떼기 | 두 건뿐이라 규칙을 만들 값어치가 없습니다 |
 | 소스 분리 되돌리기 | 관리자 판단을 무르는 길을 안 둡니다 |
 | 대기 값 「모두 승인」 | 지금 건수가 적습니다. 쌓이면 그때 |
@@ -2206,8 +2299,7 @@ Select-String 은 정규식이라 "A\|B" 가 "또는" 이 아님 → -Pattern "A
 | | 언제 |
 |---|---|
 | `search` 가 `place.updated` 를 받기 | 그 서비스를 만들어야 합니다 |
-| `GET /internal/places?ids=` 응답 넓히기 | 지금 7필드는 카드용입니다. 색인에 필요한 주소·편의시설·상태가 없습니다 |
-| 「인기 급상승」 조회수 올리기 | 누가 올릴지 안 정했습니다. 상세 조회는 읽기만 합니다 |
+| 「인기 급상승」 조회수 | 화면이 상세를 열 때 `search` 에 알립니다. 이 서비스는 읽기만 합니다 |
 
 ---
 
@@ -2218,7 +2310,6 @@ Select-String 은 정규식이라 "A\|B" 가 "또는" 이 아님 → -Pattern "A
 | ⬜편의시설 수정 경로 | 관리자가 못 고칩니다. 별도 표라 전용 경로가 필요합니다 |
 | ⬜잠금을 푸는 화면 | 지금은 데이터베이스를 직접 고쳐야 합니다 |
 | ⬜대기 값 「모두 승인」 | 건수가 쌓이면 |
-| ⬜`sigungu_code` 를 채울지 | 뽑는 함수도 소스도 없습니다 |
 | ⬜인스턴스를 늘릴 때 | ⛔회수 스케줄러를 한 대만 켜야 합니다 |
 | ⬜폐업한 병원을 가려낼지 | 아래 |
 
@@ -2259,6 +2350,7 @@ nginx                      AWS 배포 때
 | **병합** | 여러 소스가 가리키는 같은 곳을 장소 하나로 만드는 일 |
 | **정규화** | 비교할 수 있게 다듬는 일. 주소와 이름에 합니다 |
 | **정규화 주소** | `시도\|나머지` 형태. ⛔합칠지 판단하는 일 순위 키 |
+| **시군구 이름** | 주소에서 뽑은 시 · 군 · 구. 일반구는 시와 붙이고 세종은 비어 있습니다 |
 | **대표 소스** | 한 장소에 붙은 여럿 중 기준이 되는 하나 |
 | **지오코딩** | 주소를 좌표로 바꾸는 일. 카카오 로컬 API 를 씁니다 |
 | **좌표 출처** | 그 좌표가 어디서 왔는지. 원본 · 변환 · 지오코딩 셋이고 병합 임계값을 가릅니다 |
@@ -2272,3 +2364,5 @@ nginx                      AWS 배포 때
 | **UUID v7** | 시간순으로 만들어지는 식별자. 만든 순서가 곧 정렬 순서입니다 |
 | **소프트 딜리트** | 행을 지우지 않고 지운 시각만 남기는 것 |
 | **`/internal`** | 서비스끼리만 부르는 경로. ⛔게이트웨이가 라우팅하지 않습니다 |
+| **색인용 조회** | `search` 가 색인을 세울 때 읽어 가는 내부 경로. `GET /internal/places/indexing` |
+| **자바 마이그레이션** | SQL 대신 자바 코드로 쓴 Flyway 판. 여기서는 `V27` 하나입니다 |
