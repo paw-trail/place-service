@@ -212,4 +212,74 @@ class AddressNormalizerTest {
             assertThat(Sido.fromCode("12")).isNull();
         }
     }
+
+    @Nested
+    @DisplayName("시군구 이름")
+    class SigunguName {
+
+        @Test
+        @DisplayName("일반구가 있는 시는 구까지 붙인다")
+        void 일반구는_시와_붙인다() {
+            // 고양시에는 구가 셋이라 시만 담으면 세 구가 한 이름으로 뭉침
+            assertThat(AddressNormalizer.resolveSigunguName("경기도 고양시 덕양구 동세로 19", null, null))
+                    .isEqualTo("고양시 덕양구");
+        }
+
+        @Test
+        @DisplayName("자치구와 군은 그 이름 하나다")
+        void 자치구와_군() {
+            assertThat(AddressNormalizer.resolveSigunguName("서울특별시 종로구 창경궁로 261 (명륜2가)", null, null))
+                    .isEqualTo("종로구");
+            assertThat(AddressNormalizer.resolveSigunguName("전라남도 신안군 자은면 자은서부2길 508-68", null, null))
+                    .isEqualTo("신안군");
+        }
+
+        @Test
+        @DisplayName("일반구가 없는 시는 시 이름만이다")
+        void 일반구가_없는_시() {
+            // 시 다음 토큰이 읍 · 면 · 도로명이면 붙이지 않음
+            assertThat(AddressNormalizer.resolveSigunguName(null, "충청남도 공주시 반포면 상신리 594-5", null))
+                    .isEqualTo("공주시");
+        }
+
+        @Test
+        @DisplayName("세종은 시군구가 없어 null 이다")
+        void 세종은_null() {
+            // 문화정보원도 세종 행의 시군구 명칭을 비워 둠
+            assertThat(AddressNormalizer.resolveSigunguName("세종특별자치시 한누리대로 2012", null, null))
+                    .isNull();
+            assertThat(AddressNormalizer.resolveSigunguName("세종특별자치시 조치원읍 충현로 159", null, null))
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("통합 명칭으로 와도 시군구를 뽑는다")
+        void 통합_명칭() {
+            assertThat(AddressNormalizer.resolveSigunguName("전남광주통합특별시 북구 용봉로 77", null, null))
+                    .isEqualTo("북구");
+        }
+
+        @Test
+        @DisplayName("개편 별칭을 쓰지 않고 적힌 대로 담는다")
+        void 개편_별칭을_쓰지_않는다() {
+            // 별칭 표는 병합 매칭 전용임, 이 값은 사람이 고르는 지역 이름임
+            assertThat(AddressNormalizer.resolveSigunguName("인천광역시 영종구 마시란로 118 (덕교동)", null, null))
+                    .isEqualTo("영종구");
+        }
+
+        @Test
+        @DisplayName("주소에 시도가 없으면 소스가 준 시도를 거쳐 뽑는다")
+        void 시도_폴백() {
+            assertThat(AddressNormalizer.resolveSigunguName("영덕군 남정면 남호리 산26번지", null, "경상북도"))
+                    .isEqualTo("영덕군");
+        }
+
+        @Test
+        @DisplayName("시도를 끝내 못 찾거나 주소가 없으면 null 이다")
+        void 못_찾으면_null() {
+            // 시도 없이 시군구만 담으면 다른 시도의 같은 이름과 섞임
+            assertThat(AddressNormalizer.resolveSigunguName("영덕군 남정면 남호리 산26번지", null, null)).isNull();
+            assertThat(AddressNormalizer.resolveSigunguName(null, null, "경기도")).isNull();
+        }
+    }
 }
